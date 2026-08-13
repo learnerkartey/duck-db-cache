@@ -1,0 +1,64 @@
+plugins {
+    id 'java-library'
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+    }
+}
+
+dependencies {
+    api "org.springframework.boot:spring-boot-autoconfigure:${springBootVersion}"
+    api "org.springframework:spring-context"
+    implementation "org.springframework.boot:spring-boot-starter"
+    implementation "org.springframework:spring-tx"
+
+    api "io.micrometer:micrometer-core:${micrometerVersion}"
+
+    api "org.apache.arrow:flight-sql:${arrowVersion}"
+    api "org.apache.arrow:flight-core:${arrowVersion}"
+    api "org.apache.arrow:arrow-vector:${arrowVersion}"
+    api "org.apache.arrow:arrow-memory-netty:${arrowVersion}"
+    runtimeOnly "org.apache.arrow:arrow-memory-core:${arrowVersion}"
+
+    api "org.duckdb:duckdb_jdbc:${duckdbVersion}"
+
+    // Actuator is optional: health indicators are only registered (via @ConditionalOnClass) when
+    // the embedding application actually brings in spring-boot-starter-actuator itself.
+    compileOnly "org.springframework.boot:spring-boot-starter-actuator:${springBootVersion}"
+    testImplementation "org.springframework.boot:spring-boot-starter-actuator:${springBootVersion}"
+
+    compileOnly "org.springframework.boot:spring-boot-configuration-processor:${springBootVersion}"
+    annotationProcessor "org.springframework.boot:spring-boot-configuration-processor:${springBootVersion}"
+
+    testImplementation "org.springframework.boot:spring-boot-starter-test:${springBootVersion}"
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testImplementation "org.mockito:mockito-junit-jupiter"
+    testImplementation "com.tngtech.archunit:archunit-junit5:${archunitVersion}"
+    testImplementation "org.awaitility:awaitility:4.2.2"
+}
+
+test {
+    // Arrow's Netty-based off-heap allocator needs reflective access to java.nio on JDK17+
+    jvmArgs += [
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '-Dio.netty.tryReflectionSetAccessible=true'
+    ]
+}
+
+// Standalone DuckDB writer throughput benchmark - see docs/15-PERFORMANCE-TUNING.md.
+// Usage: ./gradlew :data-cache-core:runBenchmark --args="--rows=5000000 --batch-size=100000"
+tasks.register('runBenchmark', JavaExec) {
+    group = 'verification'
+    description = 'Runs the standalone DuckDB writer throughput benchmark.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.enterprise.datacache.benchmark.DuckDbWriterBenchmark'
+    jvmArgs = [
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '-Dio.netty.tryReflectionSetAccessible=true'
+    ]
+}

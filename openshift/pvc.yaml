@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-cache-storage
+spec:
+  # ReadWriteOnce is sufficient for the single-writer-replica model - see docs/18-OPERATIONS.md.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Size for (max-versions x largest dataset) per dataset, summed across all datasets, plus
+      # headroom - see docs/06-DUCKDB-CACHE.md for the physical layout.
+      storage: 100Gi
+  storageClassName: managed-premium

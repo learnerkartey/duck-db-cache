@@ -1,0 +1,10 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+out/
+*.class
+.idea/
+*.iml
+.vscode/
+/data-cache-core/build/
+/data-cache-app/build/

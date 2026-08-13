@@ -1,0 +1,141 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: data-cache-service
+  lifecycle:
+    timeout-per-shutdown-phase: 60s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.enterprise.datacache: INFO
+
+data-cache:
+  enabled: true
+
+  dremio:
+    host: ${DREMIO_HOST:}
+    port: ${DREMIO_PORT:32010}
+    username: ${DREMIO_USERNAME:}
+    password: ${DREMIO_PASSWORD:}
+    ssl-enabled: ${DREMIO_SSL_ENABLED:true}
+    connect-timeout: 30s
+    query-timeout: 30m
+    verification-sql: "SELECT 1"
+
+  arrow:
+    max-memory: ${DATA_CACHE_ARROW_MAX_MEMORY:2GB}
+
+  duckdb:
+    base-directory: ${DATA_CACHE_BASE_DIR:/data/cache}
+    temp-directory: ${DATA_CACHE_TEMP_DIR:/data/cache/temp}
+    memory-limit: ${DATA_CACHE_DUCKDB_MEMORY_LIMIT:8GB}
+    threads: ${DATA_CACHE_DUCKDB_THREADS:8}
+    max-versions: 2
+
+  refresh:
+    max-concurrent-datasets: 2
+    recover-on-startup: true
+
+  pagination:
+    default-page-size: 100
+    max-page-size: 5000
+
+  datasets:
+
+    financial:
+      enabled: true
+      table-name: financial
+      source-sql: classpath:datacache/dremio/financial.sql
+      refresh-cron: "0 0 1,4,7,10,13,16,19 * * *"
+      load-on-startup: false
+      retry:
+        max-attempts: 3
+        initial-delay: 10s
+        multiplier: 2
+        max-delay: 60s
+      validation:
+        minimum-row-count: 1000000
+        required-columns:
+          - fiscal_year
+          - fiscal_month
+          - cost_center
+          - actual_amount
+          - forecast_amount
+        sql: classpath:datacache/validation/financial.sql
+
+    organization:
+      enabled: true
+      table-name: organization
+      source-sql: classpath:datacache/dremio/organization.sql
+      refresh-cron: "0 30 2,8,14,20 * * *"
+      load-on-startup: false
+      retry:
+        max-attempts: 3
+        initial-delay: 10s
+        multiplier: 2
+        max-delay: 60s
+      validation:
+        minimum-row-count: 1
+        required-columns:
+          - cost_center
+          - business_unit
+          - cio
+          - department
+
+    headcount:
+      enabled: true
+      table-name: headcount
+      source-sql: classpath:datacache/dremio/headcount.sql
+      refresh-cron: "0 15 3,9,15,21 * * *"
+      load-on-startup: false
+      retry:
+        max-attempts: 3
+        initial-delay: 10s
+        multiplier: 2
+        max-delay: 60s
+      validation:
+        minimum-row-count: 1
+        required-columns:
+          - cost_center
+          - fiscal_year
+          - fiscal_month
+          - headcount_count
+
+  queries:
+
+    financial-summary:
+      sql: classpath:datacache/query/financial-summary.sql
+      datasets:
+        - financial
+
+    cfo-summary:
+      sql: classpath:datacache/query/cfo-summary.sql
+      datasets:
+        - financial
+        - organization
+
+    headcount-summary:
+      sql: classpath:datacache/query/headcount-summary.sql
+      datasets:
+        - headcount
+        - organization

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-cache-config
+data:
+  DREMIO_HOST: "dremio.example.internal"
+  DREMIO_PORT: "32010"
+  DREMIO_SSL_ENABLED: "true"
+  DATA_CACHE_BASE_DIR: "/data/cache"
+  DATA_CACHE_TEMP_DIR: "/data/cache/temp"
+  DATA_CACHE_DUCKDB_MEMORY_LIMIT: "8GB"
+  DATA_CACHE_DUCKDB_THREADS: "8"
+  DATA_CACHE_ARROW_MAX_MEMORY: "2GB"
+  JAVA_TOOL_OPTIONS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=60"

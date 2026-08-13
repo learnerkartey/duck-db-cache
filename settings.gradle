@@ -1,0 +1,4 @@
+rootProject.name = 'data-cache-service'
+
+include 'data-cache-core'
+include 'data-cache-app'

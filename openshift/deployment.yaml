@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-cache-service
+  labels:
+    app: data-cache-service
+spec:
+  # Single replica: refresh coordination (RefreshLock/VersionManager/MetadataStore) is
+  # in-process only. See docs/18-OPERATIONS.md before scaling this beyond 1.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: data-cache-service
+  template:
+    metadata:
+      labels:
+        app: data-cache-service
+    spec:
+      containers:
+        - name: data-cache-service
+          image: image-registry.example.com/namespace/data-cache-service:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: data-cache-config
+            - secretRef:
+                name: data-cache-dremio-credentials
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 6Gi
+          volumeMounts:
+            - name: cache-storage
+              mountPath: /data/cache
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          terminationMessagePolicy: FallbackToLogsOnError
+      terminationGracePeriodSeconds: 90
+      volumes:
+        - name: cache-storage
+          persistentVolumeClaim:
+            claimName: data-cache-storage
