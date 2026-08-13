@@ -1,11 +1,11 @@
 # 22. End-to-End Example
 
-This walks through the complete sequence using the three datasets shipped as examples in
-`data-cache-app`.
+This walks through the complete sequence using the three example datasets shipped with the
+standalone demo application.
 
 ## 1. Configure the three datasets
 
-Already present in `data-cache-app/src/main/resources/application.yml`:
+Already present in `src/main/resources/application.yml`:
 
 ```yaml
 data-cache:
@@ -21,7 +21,7 @@ see [12-ADDING-A-NEW-DATASET.md](12-ADDING-A-NEW-DATASET.md).)
 ## 2. Start the app
 
 ```bash
-./gradlew :data-cache-app:bootRun
+./gradlew bootRun
 ```
 
 No manual refresh call is needed for the first load: on startup, `DataCacheStartupCoordinator`

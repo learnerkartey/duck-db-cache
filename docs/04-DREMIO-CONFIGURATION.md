@@ -85,7 +85,7 @@ export DREMIO_HOST=dremio.example.internal
 export DREMIO_PORT=32010
 export DREMIO_USERNAME=svc_datacache
 export DREMIO_PASSWORD=********
-./gradlew :data-cache-app:bootRun
+./gradlew bootRun
 
 curl localhost:8080/actuator/health   # "dremioSource" component reflects real connectivity
 ```

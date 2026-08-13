@@ -294,8 +294,8 @@ refresh, so once a dataset has an ACTIVE version, it always has one - old or new
 its lifetime.)
 
 `DuckDbQueryEngine` throws `DatasetNotAvailableException` with the precise reason whenever a query
-references a dataset that isn't `AVAILABLE`; `data-cache-app`'s `GlobalExceptionHandler` maps it to
-HTTP `503 SERVICE_UNAVAILABLE` with body `{"errorCode":"DATASET_NOT_AVAILABLE", "message": "..."}`.
+references a dataset that isn't `AVAILABLE`; `feature.cache.api`'s `GlobalExceptionHandler` maps it
+to HTTP `503 SERVICE_UNAVAILABLE` with body `{"errorCode":"DATASET_NOT_AVAILABLE", "message": "..."}`.
 
 ## Retention still applies
 

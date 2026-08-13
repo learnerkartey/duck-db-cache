@@ -9,25 +9,38 @@ Dremio --(Arrow Flight SQL)--> Arrow batches --(bounded memory)--> DuckDB Append
    --> versioned .duckdb files --> ACTIVE/PREVIOUS lifecycle --> DuckDB query engine --> REST/Java API
 ```
 
-## Modules
+## Project structure
+
+A single, ordinary Gradle/Spring Boot project. The entire cache implementation is isolated under
+one Java package - `feature.cache` - and one resources folder - `datacache/` - so that either can
+be copied wholesale into an existing Spring Boot service. See
+[docs/INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md](docs/INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md).
 
 ```
 data-cache-service/
-├── data-cache-core/   Reusable library: Dremio client, Arrow->DuckDB writer, metadata,
-│                      versioning, refresh orchestration, query engine, Spring auto-configuration.
-│                      No REST, no web dependency. Embeddable in any Spring Boot 3 app.
-└── data-cache-app/    Standalone Spring Boot REST application - thin controllers over
-                       data-cache-core's public services. Nothing else lives here.
+├── build.gradle
+├── src/main/java/com/enterprise/datacache/
+│   ├── DataCacheApplication.java        Standalone demo app: @SpringBootApplication + @EnableDataCache.
+│   │                                     Contains no cache logic - just runs the feature standalone.
+│   └── feature/cache/                   The entire portable feature: config, spi, dremio, arrow,
+│                                         duckdb, metadata, version, refresh, startup, query,
+│                                         validation, metrics, health, model, exception, api (REST).
+└── src/main/resources/
+    ├── application.yml
+    └── datacache/                       Business SQL: dremio/*.sql, query/*.sql, validation/*.sql
 ```
 
-`data-cache-app` depends on `data-cache-core`. The reverse is enforced by an ArchUnit test
-(`ArchitectureTest`) and is structurally impossible in the Gradle module graph.
+`feature.cache` never depends on `DataCacheApplication` or anything outside itself, and only
+`feature.cache.api` depends on Spring Web/MVC - both enforced by `ArchitectureTest`. Enabling the
+feature in any Spring Boot 3 application - this one included - is exactly one annotation:
+`@EnableDataCache`, which explicitly registers every cache bean without relying on component
+scanning, so the package can live anywhere in a host application with no renaming.
 
 ## Quick start
 
 ```bash
 ./gradlew clean build
-./gradlew :data-cache-app:bootRun
+./gradlew bootRun
 ```
 
 The app starts without a live Dremio connection (Dremio is only contacted when a dataset is
@@ -39,7 +52,9 @@ New to this project? Start with the
 **[Data Cache Developer Guide](docs/DATA-CACHE-DEVELOPER-GUIDE.md)** - a single, complete,
 start-to-finish walkthrough (what the service does, storage layout, first start, restarts,
 Dremio config, adding datasets/queries, joins, pagination, refresh, failure behavior, monitoring,
-troubleshooting, and embedding). The specialized documents below go deeper on each topic.
+troubleshooting, and embedding). Integrating into an existing Spring Boot service? Go straight to
+**[Integrate into an Existing Spring Boot Service](docs/INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md)**.
+The specialized documents below go deeper on each topic.
 
 | # | Document | Covers |
 |---|----------|--------|
@@ -63,19 +78,20 @@ troubleshooting, and embedding). The specialized documents below go deeper on ea
 | 18 | [Operations](docs/18-OPERATIONS.md) | Runbook, multi-replica caveats |
 | 19 | [Troubleshooting](docs/19-TROUBLESHOOTING.md) | Common failure modes |
 | 20 | [OpenShift Deployment](docs/20-OPENSHIFT-DEPLOYMENT.md) | Manifests, PVC, resources, probes |
-| 21 | [Embedding in an Existing Service](docs/21-EMBEDDING-IN-EXISTING-SERVICE.md) | Using `data-cache-core` as a library |
+| 21 | [Embedding in an Existing Service](docs/21-EMBEDDING-IN-EXISTING-SERVICE.md) | Short pointer to the full integration guide below |
 | 22 | [End-to-End Example](docs/22-EXAMPLES-END-TO-END.md) | Full worked scenario, including a restart |
 | 23 | [Startup Cache Lifecycle](docs/23-STARTUP-CACHE-LIFECYCLE.md) | First-start auto-create, restart behavior, `StartupMode`, blocking vs. async startup |
+| - | [Integrate into an Existing Spring Boot Service](docs/INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md) | Copying `feature.cache` into another Spring Boot application - dependencies, config, `@EnableDataCache`, minimum-change checklist |
 
 ## Technology
 
 Java 17 · Spring Boot 3.3 · Apache Arrow / Arrow Flight SQL 17.0.0 · DuckDB JDBC 1.3.2.1 ·
-Micrometer · Spring Boot Actuator · JUnit 5 · Mockito · ArchUnit · Gradle (multi-module)
+Micrometer · Spring Boot Actuator · JUnit 5 · Mockito · ArchUnit · Gradle (single project)
 
 ## Status
 
-All 61 automated tests (unit, concurrency, startup-lifecycle, and Spring-context integration tests
-across both modules) pass under `./gradlew clean build`. See [docs/15-PERFORMANCE-TUNING.md](docs/15-PERFORMANCE-TUNING.md)
-for real, locally-measured DuckDB writer throughput numbers, and
-[docs/04-DREMIO-CONFIGURATION.md](docs/04-DREMIO-CONFIGURATION.md) for how to verify live Dremio
-connectivity (not required for the normal build).
+All automated tests (unit, concurrency, startup-lifecycle, portability/embedding, and
+Spring-context integration tests) pass under `./gradlew clean build`. See
+[docs/15-PERFORMANCE-TUNING.md](docs/15-PERFORMANCE-TUNING.md) for real, locally-measured DuckDB
+writer throughput numbers, and [docs/04-DREMIO-CONFIGURATION.md](docs/04-DREMIO-CONFIGURATION.md)
+for how to verify live Dremio connectivity (not required for the normal build).

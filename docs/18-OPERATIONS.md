@@ -3,7 +3,8 @@
 ## Multi-replica warning
 
 **`RefreshLock`, `VersionManager`, and `MetadataStore` coordinate only within a single JVM
-process.** Running multiple replicas of `data-cache-app` that each point at the same shared
+process.** Running multiple replicas of the application (whether the standalone demo app or a host
+service embedding `feature.cache`) that each point at the same shared
 `data-cache.duckdb.base-directory` and each independently trigger refreshes is **not safe** - two
 replicas could both decide to build "version 12" simultaneously, race on file writes, or disagree
 about which version is ACTIVE.

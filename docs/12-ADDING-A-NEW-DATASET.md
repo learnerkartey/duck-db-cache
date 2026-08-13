@@ -5,7 +5,7 @@ Entity, Repository, Loader, Scheduler, Service, or Controller.
 
 ## 1. Create the source SQL
 
-`data-cache-app/src/main/resources/datacache/dremio/expense.sql`:
+`src/main/resources/datacache/dremio/expense.sql`:
 
 ```sql
 SELECT
@@ -19,7 +19,7 @@ FROM finance.expense_data
 
 ## 2. Register the dataset
 
-`data-cache-app/src/main/resources/application.yml`:
+`src/main/resources/application.yml`:
 
 ```yaml
 data-cache:

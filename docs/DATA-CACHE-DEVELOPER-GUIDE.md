@@ -228,7 +228,7 @@ oc create secret generic data-cache-dremio-credentials \
 
 Worked example: `financial`.
 
-**Step 1** - create the source SQL, `data-cache-app/src/main/resources/datacache/dremio/financial.sql`:
+**Step 1** - create the source SQL, `src/main/resources/datacache/dremio/financial.sql`:
 
 ```sql
 SELECT fiscal_year, fiscal_month, business_unit, cost_center, account, actual_amount, forecast_amount
@@ -300,7 +300,7 @@ GROUP BY fiscal_month
 
 ## 10. Single dataset query - complete example
 
-`data-cache-app/src/main/resources/datacache/query/financial-summary.sql`:
+`src/main/resources/datacache/query/financial-summary.sql`:
 
 ```sql
 SELECT fiscal_year, fiscal_month, SUM(actual_amount) AS actual, SUM(forecast_amount) AS forecast
@@ -349,7 +349,7 @@ Response (shape of `PagedQueryResult`):
 
 ## 11. Two-dataset JOIN - complete example
 
-`data-cache-app/src/main/resources/datacache/query/cfo-summary.sql`:
+`src/main/resources/datacache/query/cfo-summary.sql`:
 
 ```sql
 SELECT o.cio, o.business_unit, SUM(f.actual_amount) AS actual, SUM(f.forecast_amount) AS forecast
@@ -634,22 +634,28 @@ issues are in [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md) and
 ## 25. Embedding into another service
 
 Assume an existing Spring Boot 3 service, `existing-finance-service`, wants this cache without
-running the standalone `data-cache-app`.
+running the standalone demo app.
 
-**Preferred: Gradle module/JAR dependency.**
+The entire cache implementation is one Java package, `com.enterprise.datacache.feature.cache`, and
+one resources folder, `src/main/resources/datacache/`. Copy both into
+`existing-finance-service` (no package rename needed), add the cache-specific Gradle dependencies,
+add a `data-cache.*` configuration block (sections 6-7 above, or the full
+[03-CONFIGURATION-REFERENCE.md](03-CONFIGURATION-REFERENCE.md)) to its own `application.yml`, and
+add exactly one annotation to its `@SpringBootApplication` class:
 
-```gradle
-dependencies {
-    implementation project(':data-cache-core')
-    // or, once published: implementation 'com.enterprise.datacache:data-cache-core:0.1.0'
+```java
+@SpringBootApplication
+@EnableDataCache
+public class ExistingFinanceServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ExistingFinanceServiceApplication.class, args);
+    }
 }
 ```
 
-Add the `data-cache.*` configuration block (sections 6-7 above, or the full
-[03-CONFIGURATION-REFERENCE.md](03-CONFIGURATION-REFERENCE.md)) to `existing-finance-service`'s own
-`application.yml`, and put your SQL files under its own `src/main/resources/datacache/...`.
-`DataCacheAutoConfiguration` is picked up automatically - no `@Import` or component-scan change
-needed.
+`@EnableDataCache` explicitly imports `DataCacheConfiguration`, which registers every cache bean -
+no component-scan of `com.enterprise.datacache` is relied upon, so this works regardless of where
+`feature.cache` ends up living inside the host application.
 
 ```java
 @Service
@@ -669,20 +675,14 @@ public class FinanceService {
 
 `DataCacheRefreshService` and `DataCacheStatusService` inject the same way.
 
-**Alternative: copy-source approach** - copy
-`data-cache-core/src/main/java/com/enterprise/datacache/**` and the
-`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` file into the
-host application (keeping package names), and add the same Gradle dependencies declared in
-`data-cache-core/build.gradle`.
-
-**Not required, either way**: the `data-cache-app` module, its REST controllers, its standalone
-`Dockerfile`, or the `openshift/*.yaml` manifests - those exist only to make `data-cache-core`
-independently runnable as its own service. Dremio integration, Arrow streaming, the DuckDB writer,
-metadata, versioning, refresh scheduling/retry, validation, startup recovery, the startup cache
-lifecycle, and the query engine are all already complete inside `data-cache-core` - nothing here
-needs to be finished by the embedding application. Full detail, including exactly which
-files/resources to copy for the copy-source approach:
-[21-EMBEDDING-IN-EXISTING-SERVICE.md](21-EMBEDDING-IN-EXISTING-SERVICE.md).
+**Not required**: the standalone demo app's `DataCacheApplication` class, its `Dockerfile`, or the
+`openshift/*.yaml` manifests - those exist only to make `feature.cache` independently runnable as
+its own service. Dremio integration, Arrow streaming, the DuckDB writer, metadata, versioning,
+refresh scheduling/retry, validation, startup recovery, the startup cache lifecycle, and the query
+engine are all already complete inside `feature.cache` - nothing here needs to be finished by the
+embedding application. Full detail, including the exact dependency versions, environment
+variables, and a complete before/after directory tree:
+[INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md](INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md).
 
 ---
 
@@ -739,7 +739,7 @@ If all four succeed, the cache is genuinely working end to end - not just "the a
 
 ```bash
 ./gradlew clean build                                                   # full build + all tests
-./gradlew :data-cache-core:runBenchmark --args="--rows=5000000"         # DuckDB writer throughput
+./gradlew runBenchmark --args="--rows=5000000"         # DuckDB writer throughput
 ```
 
 See [01-QUICK-START.md](01-QUICK-START.md) and [15-PERFORMANCE-TUNING.md](15-PERFORMANCE-TUNING.md).

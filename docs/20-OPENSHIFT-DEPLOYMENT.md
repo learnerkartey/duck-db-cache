@@ -42,7 +42,7 @@ See [16-MEMORY-SIZING.md](16-MEMORY-SIZING.md) for how to derive the request/lim
   `LivenessStateHealthIndicator`), not Dremio or dataset state - a Dremio outage must never cause
   Kubernetes to restart otherwise-healthy pods.
 - **Readiness** (`/actuator/health/readiness`): reflects whether the application context is fully
-  started (including `DataCacheAutoConfiguration`'s beans and startup recovery). Once ready, it
+  started (including `DataCacheConfiguration`'s beans and startup recovery). Once ready, it
   stays ready even if a later dataset refresh fails - see the `dataCache`/`dremioSource` health
   indicator separation in [17-METRICS-AND-MONITORING.md](17-METRICS-AND-MONITORING.md).
 

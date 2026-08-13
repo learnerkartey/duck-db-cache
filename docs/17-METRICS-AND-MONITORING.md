@@ -31,7 +31,7 @@ set) - never row data or request parameters - to keep cardinality bounded.
 
 ## Standard JVM/Spring metrics
 
-Because `data-cache-app` pulls in `spring-boot-starter-actuator`, the usual JVM/HTTP/Tomcat
+Because this project pulls in `spring-boot-starter-actuator`, the usual JVM/HTTP/Tomcat
 metrics are also exposed under `/actuator/metrics` and `/actuator/prometheus`.
 
 ## Health

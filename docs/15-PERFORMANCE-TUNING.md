@@ -3,7 +3,7 @@
 ## Benchmark tool
 
 ```bash
-./gradlew :data-cache-core:runBenchmark --args="--rows=5000000 --batch-size=100000 --columns=8 --output=/tmp/bench.duckdb"
+./gradlew runBenchmark --args="--rows=5000000 --batch-size=100000 --columns=8 --output=/tmp/bench.duckdb"
 ```
 
 `DuckDbWriterBenchmark` (`com.enterprise.datacache.benchmark`) generates synthetic Arrow batches

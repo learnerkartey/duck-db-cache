@@ -46,18 +46,24 @@ DuckDbQueryEngine: open one isolated in-process DuckDB connection
 PagedQueryResult   (VersionHandles released in a finally block either way)
 ```
 
-## Package layout (`data-cache-core`)
+## Package layout (`com.enterprise.datacache.feature.cache`)
+
+This is a single, self-contained Java package - the entire cache implementation - designed to be
+copied wholesale into any Spring Boot 3 application. Nothing outside it (in particular,
+`DataCacheApplication`, the standalone demo app's entry point) is part of the feature; nothing
+inside it depends on anything outside it. See
+[INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md](INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md).
 
 | Package | Responsibility |
 |---|---|
-| `config` | `DataCacheProperties` and nested `@ConfigurationProperties`, `DataCacheAutoConfiguration`, config validation |
+| `config` | `DataCacheProperties` and nested `@ConfigurationProperties`, `DataCacheConfiguration`, config validation |
 | `spi` | `DremioSource` / `ArrowBatchStream` - the pluggable boundary to the external source |
 | `dremio` | Real Arrow Flight SQL client implementation of `DremioSource` |
 | `arrow` | Arrow -> DuckDB type mapping |
 | `duckdb` | File-backed DuckDB connection factory and the Appender-based bulk writer |
 | `metadata` | `MetadataStore` - persistent version metadata in its own DuckDB file |
 | `version` | `VersionManager` - ACTIVE/PREVIOUS lifecycle, reader reference counting, safe deletion |
-| `refresh` | `RefreshCoordinator`, retry, per-dataset locking, dynamic cron scheduler, startup recovery, `DataCacheRefreshService` |
+| `refresh` | `RefreshCoordinator`, retry, per-dataset locking, dynamic cron scheduler, startup recovery, startup lifecycle coordinator, `DataCacheRefreshService` |
 | `query` | `QueryRegistry`, `DuckDbQueryEngine`, named-parameter binder, `DataCacheQueryService` |
 | `validation` | Row-count / required-column / custom-SQL validation |
 | `metrics` | `DataCacheMetrics` (Micrometer) |
@@ -66,9 +72,12 @@ PagedQueryResult   (VersionHandles released in a finally block either way)
 | `exception` | Typed exception hierarchy with retryable/non-retryable classification |
 | `benchmark` | Standalone DuckDB writer throughput benchmark |
 | `util` | `SqlResourceLoader`, `Sha256` |
+| `api` | Optional REST controllers (`AdminController`, `QueryController`) and DTOs - the only subpackage that depends on Spring Web/MVC |
 
-`data-cache-app` adds only `app.controller`, `app.dto`, `app.exception`, and
-`DataCacheApplication` - REST adapters over the three public services below.
+`DataCacheApplication` (outside `feature.cache`, in `com.enterprise.datacache`) is only a
+standalone demo entry point - `@SpringBootApplication` plus `@EnableDataCache` - so the feature can
+run and be tested on its own. A host application copies `feature.cache` and adds its own
+`@EnableDataCache`-annotated class; it never needs `DataCacheApplication` itself.
 
 ## Public services (the embedding surface)
 
@@ -78,8 +87,9 @@ DataCacheRefreshService.refresh(String datasetName)          // and refreshAsync
 DataCacheStatusService.getStatus(String datasetName)         // and getAllStatuses
 ```
 
-All three are ordinary Spring beans registered by `DataCacheAutoConfiguration` and can be
-`@Autowired` into any other bean. See [21-EMBEDDING-IN-EXISTING-SERVICE.md](21-EMBEDDING-IN-EXISTING-SERVICE.md).
+All three are ordinary Spring beans registered by `DataCacheConfiguration` (imported by
+`@EnableDataCache`) and can be `@Autowired` into any other bean. See
+[INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md](INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md).
 
 ## Concurrency model
 

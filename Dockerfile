@@ -4,11 +4,10 @@ WORKDIR /workspace
 
 COPY gradlew gradle.properties settings.gradle build.gradle ./
 COPY gradle ./gradle
-COPY data-cache-core ./data-cache-core
-COPY data-cache-app ./data-cache-app
+COPY src ./src
 
 RUN chmod +x gradlew && \
-    ./gradlew :data-cache-app:bootJar --no-daemon
+    ./gradlew bootJar --no-daemon
 
 # Runtime stage
 FROM eclipse-temurin:17-jre-jammy
@@ -19,7 +18,7 @@ RUN groupadd --gid 10001 datacache && \
     chown -R datacache:datacache /data/cache
 
 WORKDIR /app
-COPY --from=build /workspace/data-cache-app/build/libs/data-cache-app.jar /app/data-cache-app.jar
+COPY --from=build /workspace/build/libs/data-cache-service.jar /app/data-cache-service.jar
 
 USER datacache:datacache
 
@@ -27,4 +26,4 @@ ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=60"
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "/app/data-cache-app.jar"]
+ENTRYPOINT ["java", "-jar", "/app/data-cache-service.jar"]

@@ -1,40 +1,89 @@
 plugins {
     id 'java'
+    id 'org.springframework.boot' version "${springBootVersion}"
+    id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
 }
 
-allprojects {
-    group = 'com.enterprise.datacache'
-    version = project.findProperty('version') ?: '0.1.0'
+group = 'com.enterprise.datacache'
+version = project.findProperty('version') ?: '0.1.0'
 
-    repositories {
-        mavenCentral()
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
     }
 }
 
-subprojects {
-    apply plugin: 'java'
-    apply plugin: 'jacoco'
+dependencies {
+    // --- Spring Boot application basics (the host application already has these in practice) ---
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework:spring-tx'
+    implementation "io.micrometer:micrometer-core:${micrometerVersion}"
 
-    java {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
+    // --- Cache-feature-specific: Apache Arrow Flight SQL client ---
+    implementation "org.apache.arrow:flight-sql:${arrowVersion}"
+    implementation "org.apache.arrow:flight-core:${arrowVersion}"
+    implementation "org.apache.arrow:arrow-vector:${arrowVersion}"
+    implementation "org.apache.arrow:arrow-memory-netty:${arrowVersion}"
+    runtimeOnly "org.apache.arrow:arrow-memory-core:${arrowVersion}"
 
-    tasks.withType(JavaCompile).configureEach {
-        options.encoding = 'UTF-8'
-        options.compilerArgs << '-parameters'
-    }
+    // --- Cache-feature-specific: DuckDB JDBC driver ---
+    implementation "org.duckdb:duckdb_jdbc:${duckdbVersion}"
 
-    tasks.withType(Test).configureEach {
-        useJUnitPlatform()
-        maxHeapSize = '2g'
-        testLogging {
-            events 'passed', 'skipped', 'failed'
-            exceptionFormat 'full'
-        }
-    }
+    compileOnly "org.springframework.boot:spring-boot-configuration-processor"
+    annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
 
-    jacoco {
-        toolVersion = '0.8.12'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testImplementation "org.mockito:mockito-junit-jupiter"
+    testImplementation "com.tngtech.archunit:archunit-junit5:${archunitVersion}"
+    testImplementation "org.awaitility:awaitility:4.2.2"
+}
+
+bootJar {
+    archiveFileName = 'data-cache-service.jar'
+}
+
+test {
+    useJUnitPlatform()
+    maxHeapSize = '2g'
+    // Arrow's Netty-based off-heap allocator needs reflective access to java.nio on JDK17+.
+    jvmArgs += [
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '-Dio.netty.tryReflectionSetAccessible=true'
+    ]
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat 'full'
     }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-parameters'
+}
+
+// Standalone DuckDB writer throughput benchmark - see docs/15-PERFORMANCE-TUNING.md.
+// Usage: ./gradlew runBenchmark --args="--rows=5000000 --batch-size=100000"
+tasks.register('runBenchmark', JavaExec) {
+    group = 'verification'
+    description = 'Runs the standalone DuckDB writer throughput benchmark.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.enterprise.datacache.feature.cache.benchmark.DuckDbWriterBenchmark'
+    jvmArgs = [
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '-Dio.netty.tryReflectionSetAccessible=true'
+    ]
 }

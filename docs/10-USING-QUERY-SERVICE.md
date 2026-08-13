@@ -21,8 +21,8 @@ public class FinanceService {
 ```
 
 `DataCacheQueryService` is an ordinary Spring bean - inject it into any `@Service`, `@Component`,
-or controller. No other wiring is required beyond having `data-cache-core`'s auto-configuration on
-the classpath and `data-cache.queries.cfo-summary` registered in configuration.
+or controller. No other wiring is required beyond `@EnableDataCache` being present somewhere in
+the application and `data-cache.queries.cfo-summary` registered in configuration.
 
 ## `PagedQueryResult`
 

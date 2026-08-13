@@ -1,8 +1,9 @@
 # 11. REST API
 
-All endpoints are implemented in `data-cache-app`'s `controller` package. Controllers only call
-core facades (`DataCacheQueryService`, `DataCacheRefreshService`, `DataCacheStatusService`) - no
-query/refresh/version logic is duplicated here.
+All endpoints are implemented in `feature.cache.api` (`AdminController`, `QueryController`) -
+optional and enabled by default; set `data-cache.api.enabled=false` to disable them. Controllers
+only call the public services (`DataCacheQueryService`, `DataCacheRefreshService`,
+`DataCacheStatusService`) - no query/refresh/version logic is duplicated here.
 
 ## `POST /api/v1/cache/query/{queryName}`
 

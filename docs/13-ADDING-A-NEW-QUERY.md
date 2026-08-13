@@ -5,7 +5,7 @@ service, or controller is required.**
 
 ## 1. Create the SQL
 
-`data-cache-app/src/main/resources/datacache/query/actual-forecast-by-cio.sql`:
+`src/main/resources/datacache/query/actual-forecast-by-cio.sql`:
 
 ```sql
 SELECT

@@ -11,9 +11,10 @@
 ./gradlew clean build
 ```
 
-This compiles both modules, runs the full test suite (34 tests: unit tests, DuckDB integration
-tests using real temporary `.duckdb` files, concurrency tests, and a Spring Boot context test),
-and produces `data-cache-app/build/libs/data-cache-app.jar`.
+This compiles the project, runs the full test suite (unit tests, DuckDB integration tests using
+real temporary `.duckdb` files, concurrency tests, ArchUnit portability tests, and Spring Boot
+context tests including a host-application embedding test), and produces
+`build/libs/data-cache-service.jar`.
 
 No live Dremio connection is required for this build - Dremio connects lazily on first use, and
 the unit/integration tests replace it with an in-memory test double (`InMemoryDremioSource`,
@@ -23,7 +24,7 @@ test-scope only).
 
 ```bash
 export DATA_CACHE_BASE_DIR=/tmp/data-cache
-./gradlew :data-cache-app:bootRun
+./gradlew bootRun
 ```
 
 With the default `application.yml`, the app starts with three datasets configured
@@ -55,7 +56,7 @@ export DREMIO_PASSWORD=********
 export DATA_CACHE_BASE_DIR=/data/cache
 ```
 
-Replace the example source SQL in `data-cache-app/src/main/resources/datacache/dremio/*.sql` with
+Replace the example source SQL in `src/main/resources/datacache/dremio/*.sql` with
 your real Dremio table paths (see [05-DATASET-CONFIGURATION.md](05-DATASET-CONFIGURATION.md)),
 then:
 
@@ -77,7 +78,7 @@ curl -X POST localhost:8080/api/v1/cache/query/financial-summary \
 ## Run the benchmark
 
 ```bash
-./gradlew :data-cache-core:runBenchmark --args="--rows=5000000 --batch-size=100000"
+./gradlew runBenchmark --args="--rows=5000000 --batch-size=100000"
 ```
 
 See [15-PERFORMANCE-TUNING.md](15-PERFORMANCE-TUNING.md) for real, locally-measured numbers.
@@ -86,5 +87,5 @@ See [15-PERFORMANCE-TUNING.md](15-PERFORMANCE-TUNING.md) for real, locally-measu
 
 - [02-ARCHITECTURE.md](02-ARCHITECTURE.md) for how the pieces fit together
 - [12-ADDING-A-NEW-DATASET.md](12-ADDING-A-NEW-DATASET.md) to add your own dataset
-- [21-EMBEDDING-IN-EXISTING-SERVICE.md](21-EMBEDDING-IN-EXISTING-SERVICE.md) to use
-  `data-cache-core` inside an existing Spring Boot application instead of the standalone app
+- [INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md](INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md)
+  to copy `feature.cache` into an existing Spring Boot application instead of running the standalone app
