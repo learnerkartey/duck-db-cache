@@ -2,6 +2,7 @@ package com.enterprise.datacache.app.exception;
 
 import com.enterprise.datacache.app.dto.ErrorResponse;
 import com.enterprise.datacache.exception.DataCacheException;
+import com.enterprise.datacache.exception.DatasetNotAvailableException;
 import com.enterprise.datacache.exception.DatasetNotFoundException;
 import com.enterprise.datacache.exception.QueryNotFoundException;
 import org.slf4j.Logger;
@@ -20,6 +21,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({DatasetNotFoundException.class, QueryNotFoundException.class})
     public ResponseEntity<ErrorResponse> handleNotFound(DataCacheException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getErrorCode(), e.getMessage()));
+    }
+
+    /**
+     * A dataset with no ACTIVE version yet (still loading for the first time, or a prior load
+     * failed) is a temporary condition, not a client error or a server bug - 503 with the precise
+     * reason (see {@link DatasetNotAvailableException#availability()}) lets callers distinguish
+     * "retry shortly" from "something needs attention".
+     */
+    @ExceptionHandler(DatasetNotAvailableException.class)
+    public ResponseEntity<ErrorResponse> handleDatasetNotAvailable(DatasetNotAvailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new ErrorResponse(e.getErrorCode(), e.getMessage()));
     }
 
     @ExceptionHandler(DataCacheException.class)

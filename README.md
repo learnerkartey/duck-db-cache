@@ -35,6 +35,12 @@ actually refreshed). See [docs/01-QUICK-START.md](docs/01-QUICK-START.md).
 
 ## Documentation
 
+New to this project? Start with the
+**[Data Cache Developer Guide](docs/DATA-CACHE-DEVELOPER-GUIDE.md)** - a single, complete,
+start-to-finish walkthrough (what the service does, storage layout, first start, restarts,
+Dremio config, adding datasets/queries, joins, pagination, refresh, failure behavior, monitoring,
+troubleshooting, and embedding). The specialized documents below go deeper on each topic.
+
 | # | Document | Covers |
 |---|----------|--------|
 | 01 | [Quick Start](docs/01-QUICK-START.md) | Build, run, first refresh, first query |
@@ -58,7 +64,8 @@ actually refreshed). See [docs/01-QUICK-START.md](docs/01-QUICK-START.md).
 | 19 | [Troubleshooting](docs/19-TROUBLESHOOTING.md) | Common failure modes |
 | 20 | [OpenShift Deployment](docs/20-OPENSHIFT-DEPLOYMENT.md) | Manifests, PVC, resources, probes |
 | 21 | [Embedding in an Existing Service](docs/21-EMBEDDING-IN-EXISTING-SERVICE.md) | Using `data-cache-core` as a library |
-| 22 | [End-to-End Example](docs/22-EXAMPLES-END-TO-END.md) | Full worked scenario |
+| 22 | [End-to-End Example](docs/22-EXAMPLES-END-TO-END.md) | Full worked scenario, including a restart |
+| 23 | [Startup Cache Lifecycle](docs/23-STARTUP-CACHE-LIFECYCLE.md) | First-start auto-create, restart behavior, `StartupMode`, blocking vs. async startup |
 
 ## Technology
 
@@ -67,8 +74,8 @@ Micrometer · Spring Boot Actuator · JUnit 5 · Mockito · ArchUnit · Gradle (
 
 ## Status
 
-All 34 automated tests (unit, concurrency, and Spring-context integration tests across both
-modules) pass under `./gradlew clean build`. See [docs/15-PERFORMANCE-TUNING.md](docs/15-PERFORMANCE-TUNING.md)
+All 61 automated tests (unit, concurrency, startup-lifecycle, and Spring-context integration tests
+across both modules) pass under `./gradlew clean build`. See [docs/15-PERFORMANCE-TUNING.md](docs/15-PERFORMANCE-TUNING.md)
 for real, locally-measured DuckDB writer throughput numbers, and
 [docs/04-DREMIO-CONFIGURATION.md](docs/04-DREMIO-CONFIGURATION.md) for how to verify live Dremio
 connectivity (not required for the normal build).

@@ -2,13 +2,12 @@ data-cache:
   enabled: true
   dremio:
     host: ""
+  startup:
+    execution-mode: ASYNC
   datasets:
     financial:
       enabled: true
-      load-on-startup: false
     organization:
       enabled: true
-      load-on-startup: false
     headcount:
       enabled: true
-      load-on-startup: false

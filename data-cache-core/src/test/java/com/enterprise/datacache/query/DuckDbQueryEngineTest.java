@@ -10,6 +10,7 @@ import com.enterprise.datacache.duckdb.DuckDbConnectionFactory;
 import com.enterprise.datacache.duckdb.DuckDbDatasetWriter;
 import com.enterprise.datacache.metadata.MetadataStore;
 import com.enterprise.datacache.model.PagedQueryResult;
+import com.enterprise.datacache.refresh.RefreshLock;
 import com.enterprise.datacache.util.SqlResourceLoader;
 import com.enterprise.datacache.version.VersionManager;
 import java.math.BigDecimal;
@@ -114,7 +115,8 @@ class DuckDbQueryEngineTest {
             versionManager.activate("organization", 1);
 
             QueryRegistry registry = new QueryRegistry(properties, new SqlResourceLoader());
-            DuckDbQueryEngine engine = new DuckDbQueryEngine(registry, versionManager, duckDbProps, properties.getPagination());
+            DuckDbQueryEngine engine = new DuckDbQueryEngine(registry, versionManager,
+                    new RefreshLock(), duckDbProps, properties.getPagination());
 
             PagedQueryResult result = engine.execute("cfo-summary", Map.of("fiscalYear", 2026), 0, 10);
 
@@ -159,7 +161,8 @@ class DuckDbQueryEngineTest {
             versionManager.activate("financial", 2);
 
             QueryRegistry registry = new QueryRegistry(properties, new SqlResourceLoader());
-            DuckDbQueryEngine engine = new DuckDbQueryEngine(registry, versionManager, duckDbProps, properties.getPagination());
+            DuckDbQueryEngine engine = new DuckDbQueryEngine(registry, versionManager,
+                    new RefreshLock(), duckDbProps, properties.getPagination());
 
             PagedQueryResult result = engine.execute("cfo-summary", Map.of("fiscalYear", 2026), 0, 10);
             assertThat(result.datasetVersionsUsed()).containsEntry("financial", 2L).containsEntry("organization", 1L);

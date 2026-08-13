@@ -11,10 +11,12 @@ data-cache:
   datasets:
     financial:                                        # <- logical/stable name, used in analytical SQL
       enabled: true
+      required: true                                   # counts toward readiness in blocking startup mode
       table-name: financial                            # physical table name inside the .duckdb file
       source-sql: classpath:datacache/dremio/financial.sql
+      startup:
+        mode: USE_EXISTING_OR_CREATE                    # see docs/23-STARTUP-CACHE-LIFECYCLE.md
       refresh-cron: "0 0 1,4,7,10,13,16,19 * * *"       # 6-field Spring cron; omit to disable scheduling
-      load-on-startup: true
 
       retry:
         max-attempts: 3
@@ -50,6 +52,15 @@ before any query can use it - see [08-WRITING-DUCKDB-QUERIES.md](08-WRITING-DUCK
 The dataset's key in YAML (`financial`) is the **stable logical name** every analytical query uses
 (`FROM financial`). `table-name` is the physical column-bearing table created inside each
 version's `.duckdb` file - it defaults to the dataset key and rarely needs to differ.
+
+## Startup behavior
+
+Every enabled dataset with no ACTIVE version automatically loads on application startup - there is
+no way to opt out of this (a dataset is never left permanently empty). `startup.mode` only governs
+what happens when an ACTIVE version **already** exists (typically after a restart): reuse it as-is
+(`USE_EXISTING_OR_CREATE`, the default) or keep it serving while building a fresh version in the
+background (`ALWAYS_REFRESH`). See [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md)
+for the full behavior table and rationale.
 
 ## Cron scheduling
 

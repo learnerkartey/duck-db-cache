@@ -28,8 +28,12 @@ export DATA_CACHE_BASE_DIR=/tmp/data-cache
 
 With the default `application.yml`, the app starts with three datasets configured
 (`financial`, `organization`, `headcount`) and three queries registered
-(`financial-summary`, `cfo-summary`, `headcount-summary`), all `load-on-startup: false` so the app
-comes up immediately even without Dremio credentials.
+(`financial-summary`, `cfo-summary`, `headcount-summary`). Because none of them has a cache yet,
+the mandatory startup auto-create rule (see
+[23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md)) immediately tries to load all
+three from Dremio in the background - the app itself still comes up right away
+(`data-cache.startup.execution-mode` defaults to `ASYNC`), and without real Dremio credentials
+those background loads simply fail cleanly and get recorded as `FAILED`, which you can see below.
 
 Check status:
 
@@ -37,7 +41,9 @@ Check status:
 curl localhost:8080/api/v1/cache/admin/datasets
 ```
 
-Every dataset will report `"lastRefreshStatus":"NEVER_RUN"` until refreshed.
+Without real Dremio credentials configured, every dataset will report
+`"lastRefreshStatus":"FAILED"` with `"errorCode":"DREMIO_SOURCE_ERROR"` - that is the mandatory
+auto-create attempt that already ran on its own, not something you need to trigger.
 
 ## Point at a real Dremio and load data
 

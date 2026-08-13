@@ -2,6 +2,7 @@ package com.enterprise.datacache.config;
 
 import com.enterprise.datacache.dremio.DremioFlightSqlSource;
 import com.enterprise.datacache.health.DataCacheHealthIndicator;
+import com.enterprise.datacache.health.DataCacheReadinessIndicator;
 import com.enterprise.datacache.health.DataCacheStatusService;
 import com.enterprise.datacache.health.DataCacheStatusServiceImpl;
 import com.enterprise.datacache.health.DremioSourceHealthIndicator;
@@ -13,6 +14,7 @@ import com.enterprise.datacache.query.DuckDbQueryEngine;
 import com.enterprise.datacache.query.QueryRegistry;
 import com.enterprise.datacache.refresh.DataCacheRefreshService;
 import com.enterprise.datacache.refresh.DataCacheRefreshServiceImpl;
+import com.enterprise.datacache.refresh.DataCacheStartupCoordinator;
 import com.enterprise.datacache.refresh.DynamicRefreshScheduler;
 import com.enterprise.datacache.refresh.RefreshCoordinator;
 import com.enterprise.datacache.refresh.RefreshLock;
@@ -147,8 +149,9 @@ public class DataCacheAutoConfiguration {
 
     @Bean
     public DuckDbQueryEngine duckDbQueryEngine(QueryRegistry queryRegistry, VersionManager versionManager,
-            DataCacheProperties properties) {
-        return new DuckDbQueryEngine(queryRegistry, versionManager, properties.getDuckdb(), properties.getPagination());
+            RefreshLock refreshLock, DataCacheProperties properties) {
+        return new DuckDbQueryEngine(queryRegistry, versionManager, refreshLock, properties.getDuckdb(),
+                properties.getPagination());
     }
 
     @Bean
@@ -190,31 +193,42 @@ public class DataCacheAutoConfiguration {
     }
 
     @Bean
+    public DataCacheStartupCoordinator dataCacheStartupCoordinator(DataCacheProperties properties,
+            VersionManager versionManager, DataCacheRefreshService dataCacheRefreshService) {
+        return new DataCacheStartupCoordinator(properties, versionManager, dataCacheRefreshService);
+    }
+
+    @Bean
     public DataCacheStartupRunner dataCacheStartupRunner(DataCacheProperties properties,
-            StartupRecoveryService startupRecoveryService, DynamicRefreshScheduler dynamicRefreshScheduler,
-            DataCacheRefreshService dataCacheRefreshService) {
-        return new DataCacheStartupRunner(properties, startupRecoveryService, dynamicRefreshScheduler, dataCacheRefreshService);
+            StartupRecoveryService startupRecoveryService, DataCacheStartupCoordinator dataCacheStartupCoordinator,
+            DynamicRefreshScheduler dynamicRefreshScheduler) {
+        return new DataCacheStartupRunner(properties, startupRecoveryService, dataCacheStartupCoordinator,
+                dynamicRefreshScheduler);
     }
 
     /**
-     * Runs startup recovery, starts the dynamic scheduler, and fires {@code load-on-startup}
-     * datasets - once, after the application context is fully ready, so it never delays readiness
-     * probes or races bean initialization.
+     * Drives the required startup sequence exactly once, after the application context is fully
+     * ready: metadata recovery, then per-dataset startup-mode evaluation/initial-load triggering
+     * ({@link DataCacheStartupCoordinator}), then - only after that has decided what needs to
+     * happen - cron scheduler registration. This ordering avoids a scheduled refresh and a
+     * startup-triggered refresh ever being decided independently for the same dataset; the shared
+     * {@link RefreshLock} inside the refresh pipeline protects against them running concurrently
+     * even so.
      */
     public static final class DataCacheStartupRunner implements ApplicationListener<ApplicationReadyEvent> {
 
         private final DataCacheProperties properties;
         private final StartupRecoveryService startupRecoveryService;
+        private final DataCacheStartupCoordinator dataCacheStartupCoordinator;
         private final DynamicRefreshScheduler dynamicRefreshScheduler;
-        private final DataCacheRefreshService dataCacheRefreshService;
         private final AtomicInteger runCount = new AtomicInteger();
 
         DataCacheStartupRunner(DataCacheProperties properties, StartupRecoveryService startupRecoveryService,
-                DynamicRefreshScheduler dynamicRefreshScheduler, DataCacheRefreshService dataCacheRefreshService) {
+                DataCacheStartupCoordinator dataCacheStartupCoordinator, DynamicRefreshScheduler dynamicRefreshScheduler) {
             this.properties = properties;
             this.startupRecoveryService = startupRecoveryService;
+            this.dataCacheStartupCoordinator = dataCacheStartupCoordinator;
             this.dynamicRefreshScheduler = dynamicRefreshScheduler;
-            this.dataCacheRefreshService = dataCacheRefreshService;
         }
 
         @Override
@@ -227,13 +241,10 @@ public class DataCacheAutoConfiguration {
                 startupRecoveryService.recoverAll();
                 log.info("event=startup-recovery-complete");
             }
+            log.info("event=startup-cache-lifecycle-begin executionMode={}", properties.getStartup().getExecutionMode());
+            dataCacheStartupCoordinator.runStartupSequence();
+            log.info("event=startup-cache-lifecycle-complete");
             dynamicRefreshScheduler.start();
-            properties.getDatasets().forEach((name, config) -> {
-                if (config.isEnabled() && config.isLoadOnStartup()) {
-                    log.info("event=load-on-startup-triggered dataset={}", name);
-                    dataCacheRefreshService.refreshAsync(name);
-                }
-            });
         }
     }
 
@@ -249,5 +260,13 @@ public class DataCacheAutoConfiguration {
     @ConditionalOnMissingBean(name = "dremioSourceHealthIndicator")
     public HealthIndicator dremioSourceHealthIndicator(DremioSource dremioSource) {
         return new DremioSourceHealthIndicator(dremioSource);
+    }
+
+    @Bean
+    @ConditionalOnClass(HealthIndicator.class)
+    @ConditionalOnMissingBean(name = "dataCacheReadinessHealthIndicator")
+    public HealthIndicator dataCacheReadinessHealthIndicator(DataCacheProperties properties,
+            DataCacheStatusService statusService) {
+        return new DataCacheReadinessIndicator(properties, statusService);
     }
 }

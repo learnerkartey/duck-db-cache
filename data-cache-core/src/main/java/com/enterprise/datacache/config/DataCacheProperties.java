@@ -22,6 +22,8 @@ public class DataCacheProperties {
 
     private RefreshProperties refresh = new RefreshProperties();
 
+    private StartupProperties startup = new StartupProperties();
+
     private PaginationProperties pagination = new PaginationProperties();
 
     /** Dataset name -&gt; configuration. Keys are the stable logical/table names used in analytical SQL. */
@@ -68,6 +70,14 @@ public class DataCacheProperties {
 
     public void setRefresh(RefreshProperties refresh) {
         this.refresh = refresh;
+    }
+
+    public StartupProperties getStartup() {
+        return startup;
+    }
+
+    public void setStartup(StartupProperties startup) {
+        this.startup = startup;
     }
 
     public PaginationProperties getPagination() {

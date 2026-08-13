@@ -26,6 +26,15 @@ suffixes (`2GB`, `512MB`).
 | `query-timeout` | Duration | no | `30m` | Applied as a Flight `CallOption` timeout on execute/getStream |
 | `verification-sql` | String | no | `SELECT 1` | SQL used by the health check / live-verification task |
 
+## `data-cache.startup.*`
+
+Global startup execution strategy - see [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md).
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `execution-mode` | `StartupExecutionMode` (`ASYNC` \| `BLOCK_UNTIL_REQUIRED_CACHE_READY`) | no | `ASYNC` | Whether startup cache loads run purely in the background or the coordinator waits for required datasets |
+| `timeout` | Duration | no | `30m` | Maximum time `BLOCK_UNTIL_REQUIRED_CACHE_READY` waits before giving up (loading continues in the background regardless) |
+
 ## `data-cache.arrow.*`
 
 | Property | Type | Required | Default | Description |
@@ -47,7 +56,7 @@ suffixes (`2GB`, `512MB`).
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `max-concurrent-datasets` | int | no | `2` | Size of the bounded refresh executor |
-| `recover-on-startup` | boolean | no | `true` | Run `StartupRecoveryService` before scheduling/load-on-startup |
+| `recover-on-startup` | boolean | no | `true` | Run `StartupRecoveryService` before the startup cache lifecycle runs |
 
 ## `data-cache.pagination.*`
 
@@ -62,11 +71,12 @@ suffixes (`2GB`, `512MB`).
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `enabled` | boolean | no | `true` | Disabled datasets are skipped by scheduling, startup-load, and validation |
+| `enabled` | boolean | no | `true` | Disabled datasets are skipped by scheduling, the startup coordinator, and validation |
+| `required` | boolean | no | `true` | Whether this dataset counts toward readiness under `BLOCK_UNTIL_REQUIRED_CACHE_READY` (see [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md)) |
 | `table-name` | String | no | `<name>` | Physical table name created inside the dataset's DuckDB file |
 | `source-sql` | String | yes | - | Resource location of the Dremio source SQL (e.g. `classpath:datacache/dremio/financial.sql`) |
 | `refresh-cron` | String | no | - | 6-field Spring cron (with seconds); blank disables scheduling |
-| `load-on-startup` | boolean | no | `false` | Trigger an async refresh once, after the app is ready |
+| `startup.mode` | `StartupMode` (`USE_EXISTING_OR_CREATE` \| `ALWAYS_REFRESH`) | no | `USE_EXISTING_OR_CREATE` | Per-dataset startup behavior - see [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md) |
 | `retry.max-attempts` | int | no | `3` | Total attempts including the first |
 | `retry.initial-delay` | Duration | no | `10s` | Delay before the first retry |
 | `retry.multiplier` | double | no | `2.0` | Exponential backoff multiplier |

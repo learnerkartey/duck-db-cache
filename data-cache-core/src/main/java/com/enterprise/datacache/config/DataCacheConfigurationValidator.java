@@ -52,6 +52,10 @@ public final class DataCacheConfigurationValidator {
                 || properties.getPagination().getDefaultPageSize() > properties.getPagination().getMaxPageSize()) {
             errors.add("data-cache.pagination.default-page-size must be between 1 and max-page-size");
         }
+        if (properties.getStartup().getTimeout() == null || properties.getStartup().getTimeout().isNegative()
+                || properties.getStartup().getTimeout().isZero()) {
+            errors.add("data-cache.startup.timeout must be a positive duration");
+        }
     }
 
     private static void validateDatasets(DataCacheProperties properties, List<String> errors) {

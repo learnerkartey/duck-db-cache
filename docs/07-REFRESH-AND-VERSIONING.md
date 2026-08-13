@@ -92,7 +92,10 @@ a dataset to configuration is sufficient to get its own independent schedule.
 ## Startup recovery
 
 `StartupRecoveryService.recoverAll()` runs once, after the Spring context is fully ready
-(`ApplicationReadyEvent`), before the scheduler starts or any `load-on-startup` dataset fires:
+(`ApplicationReadyEvent`), before `DataCacheStartupCoordinator` evaluates each dataset's startup
+mode and before the scheduler starts - see
+[23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md) for the full startup sequence and
+how it decides whether to auto-create, reuse, or background-refresh each dataset:
 
 1. Any version left `BUILDING` or `VALIDATING` is a crash artifact (no reader could exist) -
    marked `FAILED`, physical file deleted.

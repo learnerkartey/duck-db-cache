@@ -2,10 +2,14 @@ package com.enterprise.datacache.query;
 
 import com.enterprise.datacache.config.DuckDbProperties;
 import com.enterprise.datacache.config.PaginationProperties;
+import com.enterprise.datacache.exception.DatasetNotAvailableException;
+import com.enterprise.datacache.exception.DatasetNotFoundException;
 import com.enterprise.datacache.exception.DuckDbWriteException;
 import com.enterprise.datacache.exception.MissingQueryParameterException;
+import com.enterprise.datacache.model.DatasetAvailability;
 import com.enterprise.datacache.model.PagedQueryResult;
 import com.enterprise.datacache.model.QueryColumn;
+import com.enterprise.datacache.refresh.RefreshLock;
 import com.enterprise.datacache.version.VersionHandle;
 import com.enterprise.datacache.version.VersionManager;
 import java.sql.DriverManager;
@@ -36,13 +40,15 @@ public class DuckDbQueryEngine {
 
     private final QueryRegistry queryRegistry;
     private final VersionManager versionManager;
+    private final RefreshLock refreshLock;
     private final DuckDbProperties duckDbProperties;
     private final PaginationProperties paginationProperties;
 
-    public DuckDbQueryEngine(QueryRegistry queryRegistry, VersionManager versionManager,
+    public DuckDbQueryEngine(QueryRegistry queryRegistry, VersionManager versionManager, RefreshLock refreshLock,
             DuckDbProperties duckDbProperties, PaginationProperties paginationProperties) {
         this.queryRegistry = queryRegistry;
         this.versionManager = versionManager;
+        this.refreshLock = refreshLock;
         this.duckDbProperties = duckDbProperties;
         this.paginationProperties = paginationProperties;
     }
@@ -56,7 +62,7 @@ public class DuckDbQueryEngine {
         List<VersionHandle> handles = new ArrayList<>(definition.datasets().size());
         try {
             for (String datasetName : definition.datasets()) {
-                handles.add(versionManager.pinActive(datasetName));
+                handles.add(pinActiveOrThrowNotAvailable(datasetName));
             }
 
             try (DuckDBConnection connection = openIsolatedConnection()) {
@@ -76,6 +82,20 @@ public class DuckDbQueryEngine {
             for (VersionHandle handle : handles) {
                 handle.close();
             }
+        }
+    }
+
+    private VersionHandle pinActiveOrThrowNotAvailable(String datasetName) {
+        try {
+            return versionManager.pinActive(datasetName);
+        } catch (DatasetNotFoundException noActiveVersion) {
+            // A dataset referenced by a registered query is always known/enabled (validated when
+            // the query was registered), so pinActive() can only fail this way when it has no
+            // ACTIVE version yet - never because the name itself is unrecognized.
+            DatasetAvailability availability = refreshLock.isRunning(datasetName)
+                    ? DatasetAvailability.STARTUP_LOADING
+                    : DatasetAvailability.UNAVAILABLE;
+            throw new DatasetNotAvailableException(datasetName, availability);
         }
     }
 

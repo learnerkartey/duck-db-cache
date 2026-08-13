@@ -13,9 +13,11 @@ import com.enterprise.datacache.metrics.DataCacheMetrics;
 import com.enterprise.datacache.model.DatasetRefreshResult;
 import com.enterprise.datacache.model.RefreshOutcome;
 import com.enterprise.datacache.model.VersionState;
-import com.enterprise.datacache.spi.ArrowBatchStream;
 import com.enterprise.datacache.spi.DremioSource;
+import com.enterprise.datacache.testsupport.BlockingDremioSource;
+import com.enterprise.datacache.testsupport.CountingFailureDremioSource;
 import com.enterprise.datacache.testsupport.InMemoryDremioSource;
+import com.enterprise.datacache.testsupport.StaticFailureDremioSource;
 import com.enterprise.datacache.util.SqlResourceLoader;
 import com.enterprise.datacache.validation.DatasetValidationService;
 import com.enterprise.datacache.version.VersionManager;
@@ -177,61 +179,4 @@ class RefreshCoordinatorTest {
         }
     }
 
-    /** Always throws the given exception when queried. */
-    private record StaticFailureDremioSource(RuntimeException toThrow) implements DremioSource {
-        @Override
-        public ArrowBatchStream executeQuery(String sql) {
-            throw toThrow;
-        }
-
-        @Override
-        public boolean isHealthy() {
-            return false;
-        }
-
-        @Override
-        public void close() {
-        }
-    }
-
-    /** Always throws, but counts attempts so retry behavior can be asserted. */
-    private record CountingFailureDremioSource(RuntimeException toThrow, AtomicInteger attempts) implements DremioSource {
-        @Override
-        public ArrowBatchStream executeQuery(String sql) {
-            attempts.incrementAndGet();
-            throw toThrow;
-        }
-
-        @Override
-        public boolean isHealthy() {
-            return false;
-        }
-
-        @Override
-        public void close() {
-        }
-    }
-
-    /** Signals {@code started}, waits for {@code release}, then throws - used to hold a refresh "in flight". */
-    private record BlockingDremioSource(CountDownLatch started, CountDownLatch release) implements DremioSource {
-        @Override
-        public ArrowBatchStream executeQuery(String sql) {
-            started.countDown();
-            try {
-                release.await(10, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            throw new DremioSourceException("released", false);
-        }
-
-        @Override
-        public boolean isHealthy() {
-            return false;
-        }
-
-        @Override
-        public void close() {
-        }
-    }
 }

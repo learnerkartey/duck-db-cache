@@ -28,8 +28,9 @@ data-cache:
       enabled: true
       table-name: expense
       source-sql: classpath:datacache/dremio/expense.sql
+      startup:
+        mode: USE_EXISTING_OR_CREATE
       refresh-cron: "0 45 1,7,13,19 * * *"
-      load-on-startup: false
       retry:
         max-attempts: 3
         initial-delay: 10s
@@ -43,15 +44,19 @@ data-cache:
           - expense_amount
 ```
 
-## 3. Trigger a refresh
+## 3. Restart the app (or trigger a refresh manually)
+
+As soon as the application restarts with this configuration, the mandatory startup auto-create
+rule notices `expense` has no ACTIVE cache yet and loads it automatically - no manual step is
+required. See [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md). If you'd rather not
+wait for a restart:
 
 ```bash
 curl -X POST localhost:8080/api/v1/cache/admin/datasets/expense/refresh
 ```
 
-or wait for its `refresh-cron` to fire - `DynamicRefreshScheduler` picks it up automatically on
-the next application restart (or immediately, if the scheduler bean is (re)created - in practice,
-restart the app after a config change).
+Subsequent refreshes happen on its `refresh-cron` schedule - `DynamicRefreshScheduler` picks up
+any newly configured dataset automatically on the next application restart.
 
 ## 4. Verify
 

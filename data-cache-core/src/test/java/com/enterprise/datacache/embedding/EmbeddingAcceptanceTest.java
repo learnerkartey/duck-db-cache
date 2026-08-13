@@ -1,8 +1,10 @@
 package com.enterprise.datacache.embedding;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.enterprise.datacache.health.DataCacheStatusService;
+import com.enterprise.datacache.model.DatasetAvailability;
 import com.enterprise.datacache.model.DatasetRefreshResult;
 import com.enterprise.datacache.model.DatasetStatus;
 import com.enterprise.datacache.model.PagedQueryResult;
@@ -12,6 +14,7 @@ import com.enterprise.datacache.refresh.DataCacheRefreshService;
 import com.enterprise.datacache.spi.DremioSource;
 import com.enterprise.datacache.testsupport.InMemoryDremioSource;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,7 +33,10 @@ import org.springframework.test.context.DynamicPropertySource;
  * own test classpath never includes {@code data-cache-app} - Gradle module dependencies only flow
  * the other direction), replaces only the external Dremio boundary with a test double, and
  * exercises the real production DuckDB writer, metadata store, refresh coordinator, version
- * manager, and query engine end-to-end via {@link DataCacheAutoConfiguration}.
+ * manager, query engine, and - critically - the mandatory startup cache lifecycle end-to-end via
+ * {@link DataCacheAutoConfiguration}: with no {@code data-cache.datasets.widgets.startup.mode}
+ * configured (the {@code USE_EXISTING_OR_CREATE} default) and no manual refresh call, the
+ * dataset must load itself automatically on startup.
  */
 @SpringBootTest(classes = EmbeddingAcceptanceTest.MinimalTestApplication.class,
         properties = {
@@ -75,32 +81,37 @@ class EmbeddingAcceptanceTest {
     private DataCacheStatusService statusService;
 
     @Test
-    void springBootAutoConfiguresCoreServicesAndFullRefreshQueryLifecycleWorks() {
+    void springBootAutoConfiguresCoreServicesAndFullStartupThenRefreshQueryLifecycleWorks() {
         assertThat(queryService).isNotNull();
         assertThat(refreshService).isNotNull();
         assertThat(statusService).isNotNull();
 
-        DatasetRefreshResult first = refreshService.refresh("widgets");
-        assertThat(first.outcome()).isEqualTo(RefreshOutcome.SUCCESS);
-        assertThat(first.newVersion()).isEqualTo(1L);
+        // No manual refresh call anywhere above this line: the dataset has no ACTIVE cache when the
+        // context starts, so DataCacheStartupCoordinator must load it automatically (default
+        // StartupMode.USE_EXISTING_OR_CREATE's mandatory auto-create rule).
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                assertThat(statusService.getStatus("widgets").availability()).isEqualTo(DatasetAvailability.AVAILABLE));
 
-        DatasetStatus statusAfterFirst = statusService.getStatus("widgets");
-        assertThat(statusAfterFirst.activeVersion()).isEqualTo(1L);
-        assertThat(statusAfterFirst.activeRowCount()).isEqualTo(2000L);
+        DatasetStatus statusAfterAutoCreate = statusService.getStatus("widgets");
+        assertThat(statusAfterAutoCreate.lastRefreshStatus()).isEqualTo(RefreshOutcome.SUCCESS);
+        assertThat(statusAfterAutoCreate.activeRowCount()).isEqualTo(2000L);
+        long autoCreatedVersion = statusAfterAutoCreate.activeVersion();
 
         PagedQueryResult result = queryService.execute("list-widgets", Map.of("excluded", "no-match"), 0, 50);
         assertThat(result.rows()).hasSize(50);
         assertThat(result.totalRows()).isEqualTo(2000);
+        assertThat(result.datasetVersionsUsed()).containsEntry("widgets", autoCreatedVersion);
 
-        DatasetRefreshResult second = refreshService.refresh("widgets");
-        assertThat(second.outcome()).isEqualTo(RefreshOutcome.SUCCESS);
-        assertThat(second.newVersion()).isEqualTo(2L);
+        // A manual refresh still goes through the exact same pipeline and produces the next version.
+        DatasetRefreshResult manual = refreshService.refresh("widgets");
+        assertThat(manual.outcome()).isEqualTo(RefreshOutcome.SUCCESS);
+        assertThat(manual.newVersion()).isEqualTo(autoCreatedVersion + 1);
 
-        DatasetStatus statusAfterSecond = statusService.getStatus("widgets");
-        assertThat(statusAfterSecond.activeVersion()).isEqualTo(2L);
-        assertThat(statusAfterSecond.previousVersion()).isEqualTo(1L);
+        DatasetStatus statusAfterManual = statusService.getStatus("widgets");
+        assertThat(statusAfterManual.activeVersion()).isEqualTo(autoCreatedVersion + 1);
+        assertThat(statusAfterManual.previousVersion()).isEqualTo(autoCreatedVersion);
 
-        PagedQueryResult resultAfterSecondRefresh = queryService.execute("list-widgets", Map.of("excluded", "no-match"), 0, 10);
-        assertThat(resultAfterSecondRefresh.datasetVersionsUsed()).containsEntry("widgets", 2L);
+        PagedQueryResult resultAfterManualRefresh = queryService.execute("list-widgets", Map.of("excluded", "no-match"), 0, 10);
+        assertThat(resultAfterManualRefresh.datasetVersionsUsed()).containsEntry("widgets", autoCreatedVersion + 1);
     }
 }

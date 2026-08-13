@@ -10,6 +10,7 @@ import com.enterprise.datacache.duckdb.DuckDbConnectionFactory;
 import com.enterprise.datacache.duckdb.DuckDbDatasetWriter;
 import com.enterprise.datacache.metadata.MetadataStore;
 import com.enterprise.datacache.model.PagedQueryResult;
+import com.enterprise.datacache.refresh.RefreshLock;
 import com.enterprise.datacache.util.SqlResourceLoader;
 import com.enterprise.datacache.version.VersionManager;
 import java.nio.file.Path;
@@ -72,7 +73,7 @@ class PaginationAndParameterSafetyTest {
         versionManager.activate("widgets", 1);
 
         QueryRegistry registry = new QueryRegistry(properties, new SqlResourceLoader());
-        return new DuckDbQueryEngine(registry, versionManager, duckDbProps, properties.getPagination());
+        return new DuckDbQueryEngine(registry, versionManager, new RefreshLock(), duckDbProps, properties.getPagination());
     }
 
     @Test

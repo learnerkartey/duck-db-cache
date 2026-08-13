@@ -14,8 +14,15 @@ public class DatasetProperties {
     /** Standard 6-field Spring cron expression (with seconds); null/blank disables scheduled refresh. */
     private String refreshCron;
 
-    /** Whether to trigger a refresh automatically on application startup (subject to recovery/lock rules). */
-    private boolean loadOnStartup = false;
+    /** Per-dataset startup behavior - see {@link StartupMode}. */
+    private DatasetStartupProperties startup = new DatasetStartupProperties();
+
+    /**
+     * Whether this dataset counts toward readiness when
+     * {@code data-cache.startup.execution-mode} is {@code BLOCK_UNTIL_REQUIRED_CACHE_READY}.
+     * Non-required datasets may still be unavailable without holding back the readiness probe.
+     */
+    private boolean required = true;
 
     private RetryProperties retry = new RetryProperties();
 
@@ -53,12 +60,20 @@ public class DatasetProperties {
         this.refreshCron = refreshCron;
     }
 
-    public boolean isLoadOnStartup() {
-        return loadOnStartup;
+    public DatasetStartupProperties getStartup() {
+        return startup;
     }
 
-    public void setLoadOnStartup(boolean loadOnStartup) {
-        this.loadOnStartup = loadOnStartup;
+    public void setStartup(DatasetStartupProperties startup) {
+        this.startup = startup;
+    }
+
+    public boolean isRequired() {
+        return required;
+    }
+
+    public void setRequired(boolean required) {
+        this.required = required;
     }
 
     public RetryProperties getRetry() {

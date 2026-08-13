@@ -61,9 +61,15 @@ public class FinanceService {
 ```
 
 Nothing else is required - Dremio integration, Arrow streaming, the DuckDB writer, metadata,
-version management, refresh scheduling/retry, validation, startup recovery, and the query engine
-are already complete. You are not expected to (and should not need to) implement any of that
-yourself.
+version management, refresh scheduling/retry, validation, startup recovery, the mandatory startup
+cache lifecycle (`DataCacheStartupCoordinator` - see
+[23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md)), and the query engine are already
+complete. You are not expected to (and should not need to) implement any of that yourself. If the
+host application already exposes an Actuator readiness probe, add
+`data-cache.startup.execution-mode=BLOCK_UNTIL_REQUIRED_CACHE_READY` and
+`management.endpoint.health.group.readiness.include=readinessState,dataCacheReadiness` to gate it
+on required datasets being ready; otherwise the default `ASYNC` mode needs no readiness wiring at
+all.
 
 ## Option B: copy-source approach
 

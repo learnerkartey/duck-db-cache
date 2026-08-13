@@ -18,6 +18,12 @@ management:
       show-details: when-authorized
       probes:
         enabled: true
+      group:
+        # dataCacheReadiness only actually gates readiness when
+        # data-cache.startup.execution-mode=BLOCK_UNTIL_REQUIRED_CACHE_READY (see
+        # docs/23-STARTUP-CACHE-LIFECYCLE.md); in the default ASYNC mode it always reports UP.
+        readiness:
+          include: readinessState,dataCacheReadiness
   health:
     livenessstate:
       enabled: true
@@ -31,6 +37,13 @@ logging:
 
 data-cache:
   enabled: true
+
+  # See docs/23-STARTUP-CACHE-LIFECYCLE.md. ASYNC (the default) never delays application startup;
+  # BLOCK_UNTIL_REQUIRED_CACHE_READY additionally gates the readiness probe (above) on every
+  # dataset marked required: true (the default) actually having a usable cache.
+  startup:
+    execution-mode: ${DATA_CACHE_STARTUP_EXECUTION_MODE:ASYNC}
+    timeout: 30m
 
   dremio:
     host: ${DREMIO_HOST:}
@@ -64,10 +77,12 @@ data-cache:
 
     financial:
       enabled: true
+      required: true
       table-name: financial
       source-sql: classpath:datacache/dremio/financial.sql
+      startup:
+        mode: USE_EXISTING_OR_CREATE
       refresh-cron: "0 0 1,4,7,10,13,16,19 * * *"
-      load-on-startup: false
       retry:
         max-attempts: 3
         initial-delay: 10s
@@ -85,10 +100,12 @@ data-cache:
 
     organization:
       enabled: true
+      required: true
       table-name: organization
       source-sql: classpath:datacache/dremio/organization.sql
+      startup:
+        mode: USE_EXISTING_OR_CREATE
       refresh-cron: "0 30 2,8,14,20 * * *"
-      load-on-startup: false
       retry:
         max-attempts: 3
         initial-delay: 10s
@@ -104,10 +121,14 @@ data-cache:
 
     headcount:
       enabled: true
+      # Not required for readiness: in BLOCK_UNTIL_REQUIRED_CACHE_READY mode the readiness probe
+      # will report UP once financial/organization are ready even if headcount is still loading.
+      required: false
       table-name: headcount
       source-sql: classpath:datacache/dremio/headcount.sql
+      startup:
+        mode: ALWAYS_REFRESH
       refresh-cron: "0 15 3,9,15,21 * * *"
-      load-on-startup: false
       retry:
         max-attempts: 3
         initial-delay: 10s

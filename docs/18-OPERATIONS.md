@@ -12,12 +12,16 @@ The initial design assumes **one refresh-owning replica**. Practical deployment 
 
 1. Run a single replica for refresh + query serving (simplest; fine for most workloads given
    DuckDB's read performance).
-2. Run one dedicated "refresher" replica (cron/admin-triggered refreshes only, e.g.
-   `load-on-startup: false` everywhere and drive refreshes externally) and N read-only replicas
-   that only serve queries against the same shared, read-only-mounted storage. This still requires
-   care: a read replica's `VersionManager` only learns about new ACTIVE versions by re-reading
-   `MetadataStore` - which it does on every `pinActive()` call - so this works as long as only one
-   process ever *writes* new versions.
+2. Run one dedicated "refresher" replica (cron/admin-triggered refreshes) and N read-only replicas
+   that only serve queries against the same shared, read-only-mounted storage. Note that the
+   mandatory startup auto-create rule (see
+   [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md)) fires on **every** replica for
+   any dataset with no ACTIVE version - there is no per-replica opt-out - so start the refresher
+   replica first and let it produce at least one ACTIVE version per dataset before starting the
+   read-only replicas, or they will attempt (and duplicate) their own initial loads too. Once every
+   dataset has an ACTIVE version, a read replica's `VersionManager` only learns about new versions
+   by re-reading `MetadataStore` - which it does on every `pinActive()` call - so this works as
+   long as only the refresher replica ever *writes* new versions afterward.
 3. Introduce an external distributed lock (e.g. a Kubernetes `Lease`, a database advisory lock) in
    front of `RefreshLock` if you need multiple replicas that can all trigger refreshes safely. This
    was deliberately **not implemented** - `RefreshLock`, `VersionManager`, and the metadata
