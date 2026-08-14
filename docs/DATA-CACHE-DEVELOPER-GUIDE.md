@@ -593,9 +593,42 @@ curl localhost:8080/api/v1/cache/admin/datasets/financial
   "lastRefreshStatus": "SUCCESS",
   "lastRefreshDurationMs": 49965,
   "lastError": null,
-  "refreshInProgress": false
+  "refreshInProgress": false,
+  "buildingVersion": null,
+  "refreshStage": null,
+  "rowsProcessed": null,
+  "batchesProcessed": null,
+  "elapsedMs": null,
+  "averageRowsPerSecond": null,
+  "estimatedPercent": null
 }
 ```
+
+While a refresh is actually in flight, `activeVersion` keeps reporting whatever version is still
+serving queries (V12 below) while `buildingVersion` and the live progress fields describe the new
+attempt separately - the two are never conflated:
+
+```json
+{
+  "datasetName": "financial",
+  "activeVersion": 12,
+  "buildingVersion": 13,
+  "refreshInProgress": true,
+  "refreshStage": "STREAMING",
+  "rowsProcessed": 12400000,
+  "batchesProcessed": 190,
+  "elapsedMs": 536000,
+  "averageRowsPerSecond": 23134.2,
+  "estimatedPercent": 40.0
+}
+```
+
+`refreshStage` is one of `CONNECTING_DREMIO`, `WAITING_FOR_FIRST_BATCH`, `STREAMING`, `VALIDATING`,
+`ACTIVATING`, `CLEANING_UP`, `COMPLETED`, `FAILED` - see
+[#monitoring-a-cache-refresh-from-logs](#monitoring-a-cache-refresh-from-logs) below.
+`estimatedPercent` is present only when a basis is available (a configured
+`progress.expected-row-count`, or the previous ACTIVE version's row count) and is always labeled
+as an estimate - the new version's actual final row count may differ.
 
 `GET /actuator/health` reports two independent components: `dataCache` (is the cache itself
 queryable - stays UP even if the latest refresh failed, as long as an older ACTIVE version still
@@ -618,6 +651,78 @@ pinpoints the bottleneck without guesswork:
 
 Full metric names and diagnosis recipes:
 [15-PERFORMANCE-TUNING.md](15-PERFORMANCE-TUNING.md), [17-METRICS-AND-MONITORING.md](17-METRICS-AND-MONITORING.md).
+
+### Monitoring a cache refresh from logs
+
+This is what watching a large refresh actually looks like end to end - here, `financial` V13
+loading roughly 31.8M rows while V12 keeps serving every query in the meantime.
+
+```
+08:00:00.104 INFO  event=dataset-refresh-started dataset=financial version=13 trigger=SCHEDULED startupRefresh=false status=BUILDING
+08:00:00.118 INFO  event=dremio-query-started dataset=financial version=13 sourceSql=classpath:datacache/dremio/financial.sql
+08:00:39.440 INFO  event=dremio-first-batch dataset=financial version=13 timeToFirstBatchMs=39322 columns=166
+08:01:12.881 INFO  event=dataset-load-progress dataset=financial version=13 status=BUILDING rowsProcessed=1000000 elapsedMs=72761 averageRowsPerSecond=13744.7 currentRowsPerSecond=13744.7 batchesProcessed=16 duckDbFileSizeBytes=142606336
+08:01:43.209 INFO  event=dataset-load-progress dataset=financial version=13 status=BUILDING rowsProcessed=2000000 elapsedMs=103089 averageRowsPerSecond=19401.2 currentRowsPerSecond=32989.7 batchesProcessed=31 duckDbFileSizeBytes=285737984
+                                                                        ...
+08:18:22.552 INFO  event=dataset-load-completed dataset=financial version=13 rowsProcessed=31842511 batchesProcessed=486 loadDurationMs=1342448
+08:18:22.560 INFO  event=dataset-validation-started dataset=financial version=13
+08:18:23.041 INFO  event=dataset-validation dataset=financial version=13 validation=minimum-row-count status=PASS detail=rowCount=31842511
+08:18:23.043 INFO  event=dataset-validation dataset=financial version=13 validation=required-columns status=PASS detail=all present
+08:18:31.128 INFO  event=dataset-version-activated dataset=financial newVersion=13 previousVersion=12 rowCount=31842511
+08:18:31.140 INFO  event=dataset-refresh-completed dataset=financial version=13 status=SUCCESS rows=31842511 batches=486 totalDurationMs=1374122 dremioSetupMs=118 dremioFirstBatchMs=39322 arrowTransferMs=612044 duckDbWriteMs=701829 validationMs=481 activationMs=8087 averageRowsPerSecond=23182.6
+```
+
+**What each field means:**
+
+| Event | Fires | Key fields |
+|---|---|---|
+| `dataset-refresh-started` | Once, immediately | `trigger` (`STARTUP`\|`SCHEDULED`\|`MANUAL`\|`REFRESH_ALL`) and `startupRefresh` tell you *why* this refresh is running |
+| `dremio-query-started` | Right before the Flight SQL query is submitted | `sourceSql` is the resource path, never the raw SQL text |
+| `dremio-first-batch` | Once, when the first Arrow batch arrives | `timeToFirstBatchMs` isolates Dremio planning/startup time from actual data transfer - high here means the problem is on the Dremio side before any data has even moved |
+| `dataset-load-progress` | Whenever `row-interval` rows OR `time-interval` has passed since the last one (whichever first) | `rowsProcessed` only ever counts rows already persisted to DuckDB; `averageRowsPerSecond` is since the refresh started, `currentRowsPerSecond` is since the *previous* progress line - a widening gap between them means throughput is degrading over the run, not just naturally variable |
+| `dataset-load-completed` | Once, when the Arrow→DuckDB write loop finishes | Final, authoritative row/batch count for this attempt regardless of whether any progress line ever fired |
+| `dataset-validation-started` / `dataset-validation` | Once, then once per configured rule (row count, required columns, custom SQL - at most three lines, never per value) | `status=PASS`/`FAIL` per rule |
+| `dataset-version-activated` | Once, at the atomic ACTIVE cutover | `previousVersion` is what queries were using a moment ago; `newVersion` is what they use from now on |
+| `dataset-refresh-completed` | Once, at the very end of a successful attempt | The full phase-by-phase timing breakdown in one line - compare `dremioFirstBatchMs`/`arrowTransferMs`/`duckDbWriteMs`/`validationMs`/`activationMs` to find the dominant cost |
+| `dataset-refresh-failed` | Once, at the very end of a failed attempt (replaces `dataset-refresh-completed` for that outcome) | `rowsProcessed`/`elapsedMs`/`stage` describe exactly how far the failed attempt got; `existingActiveVersion`/`existingActivePreserved=true` confirm the previously-ACTIVE version was never touched |
+
+Every one of these lines carries `dataset` and `version` (or `failedVersion`), so `grep`-ing or
+piping through a log aggregator by dataset name cleanly separates concurrent refreshes of
+different datasets - `financial` V13's progress lines never interleave ambiguously with
+`headcount` V8's.
+
+### Configuring log frequency
+
+`data-cache.logging.progress.row-interval` and `.time-interval` trade off log volume against
+freshness - whichever threshold is crossed first triggers a line, so both very fast and very slow
+sources produce a bounded, predictable rate of log lines:
+
+```yaml
+# A 30M+ row dataset: a line roughly every 5M rows or every minute, whichever comes first -
+# a handful of lines for the whole load, not a wall of them. This setting is global (applies to
+# every dataset's refresh), not per-dataset.
+data-cache:
+  logging:
+    progress:
+      row-interval: 5000000
+      time-interval: 60s
+```
+
+```yaml
+# Local development against a small/synthetic dataset: frequent lines so you can actually watch
+# it move.
+data-cache:
+  logging:
+    progress:
+      row-interval: 100000
+      time-interval: 10s
+```
+
+At the default `row-interval: 1000000` / `time-interval: 30s`, a 30M-row load produces on the
+order of 30-60 progress lines total - never one per row, never one per Arrow batch (individual
+batches are only ever logged at `DEBUG`, if at all). Set `data-cache.logging.progress.enabled:
+false` to silence periodic progress lines entirely while keeping the start/first-batch/completed/
+failed summary events, which are never gated by this configuration.
 
 ## 24. Troubleshooting
 

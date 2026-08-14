@@ -39,7 +39,8 @@ Triggers a manual refresh and blocks until it completes. Response body is a
   "activeVersion": 11,
   "timings": { "dremioSetupMs": 120, "timeToFirstBatchMs": 340, "arrowTransferMs": 8200,
                "duckDbWriteMs": 41000, "validationMs": 300, "activationMs": 5,
-               "totalMs": 49965, "rowsLoaded": 31284901, "bytesLoaded": 2147483648 },
+               "totalMs": 49965, "rowsLoaded": 31284901, "bytesLoaded": 2147483648,
+               "batchesLoaded": 486 },
   "errorCode": null,
   "errorMessage": null,
   "attemptsMade": 1
@@ -69,12 +70,23 @@ Response is `Map<String, DatasetStatus>` for every configured dataset:
     "lastRefreshStatus": "SUCCESS",
     "lastRefreshDurationMs": 49965,
     "lastError": null,
-    "refreshInProgress": false
+    "refreshInProgress": false,
+    "buildingVersion": null,
+    "refreshStage": null,
+    "rowsProcessed": null,
+    "batchesProcessed": null,
+    "elapsedMs": null,
+    "averageRowsPerSecond": null,
+    "estimatedPercent": null
   }
 }
 ```
 
-No passwords, raw SQL, or file paths are ever included.
+No passwords, raw SQL, or file paths are ever included. While a refresh is in flight,
+`activeVersion` keeps reporting the version still serving queries and the last seven fields above
+describe the separate in-flight `buildingVersion` - see
+[DATA-CACHE-DEVELOPER-GUIDE.md#22-status-and-health](DATA-CACHE-DEVELOPER-GUIDE.md#22-status-and-health)
+for a worked mid-refresh example.
 
 ## `GET /api/v1/cache/admin/datasets/{datasetName}`
 

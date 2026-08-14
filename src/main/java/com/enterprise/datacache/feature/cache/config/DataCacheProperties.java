@@ -28,6 +28,8 @@ public class DataCacheProperties {
 
     private ApiProperties api = new ApiProperties();
 
+    private LoggingProperties logging = new LoggingProperties();
+
     /** Dataset name -&gt; configuration. Keys are the stable logical/table names used in analytical SQL. */
     private Map<String, DatasetProperties> datasets = new LinkedHashMap<>();
 
@@ -96,6 +98,14 @@ public class DataCacheProperties {
 
     public void setApi(ApiProperties api) {
         this.api = api;
+    }
+
+    public LoggingProperties getLogging() {
+        return logging;
+    }
+
+    public void setLogging(LoggingProperties logging) {
+        this.logging = logging;
     }
 
     public Map<String, DatasetProperties> getDatasets() {

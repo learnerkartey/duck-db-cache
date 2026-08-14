@@ -63,9 +63,10 @@ class DecimalSchemaEvolutionTest {
 
     private RefreshCoordinator newCoordinator(DataCacheProperties properties, DecimalSchemaDremioSource source,
             MetadataStore metadataStore, VersionManager versionManager) {
+        DataCacheMetrics metrics = new DataCacheMetrics(new SimpleMeterRegistry());
         return new RefreshCoordinator(properties, source, new SqlResourceLoader(), metadataStore, versionManager,
                 new DatasetValidationService(new SqlResourceLoader()), new RefreshLock(),
-                new RetryExecutor(noOpSleeper), new DataCacheMetrics(new SimpleMeterRegistry()));
+                new RetryExecutor(noOpSleeper), metrics, new RefreshProgressRegistry(metrics));
     }
 
     private MetadataStore newMetadataStore(DuckDbProperties duckDbProps) {

@@ -10,6 +10,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -39,6 +40,7 @@ public class DuckDbDatasetWriter implements AutoCloseable {
     private DuckDBAppender appender;
     private List<ColumnMapping> columnMappings;
     private long rowCount;
+    private long bytesProcessed;
     private long rowsSinceFlush;
 
     public DuckDbDatasetWriter(Path filePath, String datasetName, String tableName, DuckDbProperties properties) {
@@ -78,13 +80,27 @@ public class DuckDbDatasetWriter implements AutoCloseable {
         }
     }
 
-    /** Appends every row of {@code batch} to the table. The caller retains ownership of {@code batch}. */
-    public void writeBatch(VectorSchemaRoot batch) {
+    /**
+     * Appends every row of {@code batch} to the table. The caller retains ownership of
+     * {@code batch}.
+     *
+     * @return the approximate number of bytes this batch occupied in Arrow's own buffers (summed
+     *         once per batch from {@link FieldVector#getFieldBuffers()}, never computed per row) -
+     *         a cheap, real measure of data actually processed, exposed for progress logging.
+     *         {@code 0} if the batch is empty.
+     */
+    public long writeBatch(VectorSchemaRoot batch) {
         if (appender == null) {
             throw new IllegalStateException("begin() must be called before writeBatch()");
         }
         int rowCountInBatch = batch.getRowCount();
         List<FieldVector> vectors = batch.getFieldVectors();
+        long batchBytes = 0;
+        for (FieldVector vector : vectors) {
+            for (ArrowBuf buf : vector.getFieldBuffers()) {
+                batchBytes += buf.readableBytes();
+            }
+        }
         try {
             for (int row = 0; row < rowCountInBatch; row++) {
                 appender.beginRow();
@@ -94,15 +110,22 @@ public class DuckDbDatasetWriter implements AutoCloseable {
                 appender.endRow();
             }
             rowCount += rowCountInBatch;
+            bytesProcessed += batchBytes;
             rowsSinceFlush += rowCountInBatch;
             if (rowsSinceFlush >= FLUSH_EVERY_ROWS) {
                 appender.flush();
                 rowsSinceFlush = 0;
             }
+            return batchBytes;
         } catch (SQLException e) {
             throw new DuckDbWriteException("Failed writing batch to DuckDB table " + tableName + " after "
                     + rowCount + " rows", e);
         }
+    }
+
+    /** Cumulative Arrow-buffer bytes processed across every {@link #writeBatch} call so far. */
+    public long bytesProcessed() {
+        return bytesProcessed;
     }
 
     /** Flushes and closes the appender, checkpoints the database to disk, and returns the total row count written. */

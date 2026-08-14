@@ -35,30 +35,45 @@ public class DatasetValidationService {
     public ValidationOutcome validate(String datasetName, Path filePath, String tableName, long rowCount,
             List<String> columnNames, ValidationProperties properties) {
         List<String> failures = new ArrayList<>();
+        List<ValidationOutcome.CheckResult> checks = new ArrayList<>();
 
-        if (properties.getMinimumRowCount() > 0 && rowCount < properties.getMinimumRowCount()) {
-            failures.add("row count " + rowCount + " is below configured minimum " + properties.getMinimumRowCount());
+        if (properties.getMinimumRowCount() > 0) {
+            if (rowCount < properties.getMinimumRowCount()) {
+                String reason = "row count " + rowCount + " is below configured minimum " + properties.getMinimumRowCount();
+                failures.add(reason);
+                checks.add(new ValidationOutcome.CheckResult("minimum-row-count", false, reason));
+            } else {
+                checks.add(new ValidationOutcome.CheckResult("minimum-row-count", true, "rowCount=" + rowCount));
+            }
         }
 
         if (properties.getRequiredColumns() != null && !properties.getRequiredColumns().isEmpty()) {
             Set<String> actual = columnNames.stream().map(c -> c.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
+            List<String> missing = new ArrayList<>();
             for (String required : properties.getRequiredColumns()) {
                 if (!actual.contains(required.toLowerCase(Locale.ROOT))) {
-                    failures.add("required column '" + required + "' is missing from the loaded schema");
+                    String reason = "required column '" + required + "' is missing from the loaded schema";
+                    failures.add(reason);
+                    missing.add(required);
                 }
             }
+            checks.add(new ValidationOutcome.CheckResult("required-columns", missing.isEmpty(),
+                    missing.isEmpty() ? "all present" : "missing=" + missing));
         }
 
         if (properties.getSql() != null && !properties.getSql().isBlank()) {
             String sql = sqlResourceLoader.load(properties.getSql());
-            failures.addAll(runCustomSql(datasetName, filePath, sql));
+            List<String> customSqlFailures = runCustomSql(datasetName, filePath, sql);
+            failures.addAll(customSqlFailures);
+            checks.add(new ValidationOutcome.CheckResult("custom-sql", customSqlFailures.isEmpty(),
+                    customSqlFailures.isEmpty() ? "passed" : customSqlFailures.get(0)));
         }
 
         if (!failures.isEmpty()) {
             log.warn("event=dataset-validation-failed dataset={} table={} reasons={}", datasetName, tableName, failures);
-            return ValidationOutcome.fail(failures);
+            return ValidationOutcome.fail(failures, checks);
         }
-        return ValidationOutcome.pass();
+        return ValidationOutcome.pass(checks);
     }
 
     private List<String> runCustomSql(String datasetName, Path filePath, String sql) {

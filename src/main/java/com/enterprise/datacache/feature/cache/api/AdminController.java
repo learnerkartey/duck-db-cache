@@ -3,6 +3,7 @@ package com.enterprise.datacache.feature.cache.api;
 import com.enterprise.datacache.feature.cache.health.DataCacheStatusService;
 import com.enterprise.datacache.feature.cache.model.DatasetRefreshResult;
 import com.enterprise.datacache.feature.cache.model.DatasetStatus;
+import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import com.enterprise.datacache.feature.cache.refresh.DataCacheRefreshService;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,7 +31,7 @@ public class AdminController {
 
     @PostMapping("/datasets/{datasetName}/refresh")
     public DatasetRefreshResult refreshDataset(@PathVariable String datasetName) {
-        return refreshService.refresh(datasetName);
+        return refreshService.refresh(datasetName, RefreshTrigger.MANUAL);
     }
 
     @PostMapping("/refresh-all")

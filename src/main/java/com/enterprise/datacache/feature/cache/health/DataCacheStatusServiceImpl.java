@@ -7,8 +7,11 @@ import com.enterprise.datacache.feature.cache.metadata.MetadataStore;
 import com.enterprise.datacache.feature.cache.model.DatasetStatus;
 import com.enterprise.datacache.feature.cache.model.DatasetVersion;
 import com.enterprise.datacache.feature.cache.model.RefreshOutcome;
+import com.enterprise.datacache.feature.cache.model.RefreshStage;
 import com.enterprise.datacache.feature.cache.model.VersionState;
 import com.enterprise.datacache.feature.cache.refresh.RefreshLock;
+import com.enterprise.datacache.feature.cache.refresh.RefreshProgress;
+import com.enterprise.datacache.feature.cache.refresh.RefreshProgressRegistry;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,12 +22,14 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
     private final DataCacheProperties properties;
     private final MetadataStore metadataStore;
     private final RefreshLock refreshLock;
+    private final RefreshProgressRegistry progressRegistry;
 
     public DataCacheStatusServiceImpl(DataCacheProperties properties, MetadataStore metadataStore,
-            RefreshLock refreshLock) {
+            RefreshLock refreshLock, RefreshProgressRegistry progressRegistry) {
         this.properties = properties;
         this.metadataStore = metadataStore;
         this.refreshLock = refreshLock;
+        this.progressRegistry = progressRegistry;
     }
 
     @Override
@@ -45,6 +50,32 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
                 .map(DatasetVersion::errorSummary)
                 .orElse(null);
 
+        boolean refreshInProgress = refreshLock.isRunning(datasetName);
+
+        // Live progress fields are populated only while a refresh is actually in flight - once it
+        // finishes, RefreshProgress may still be in the registry (for metrics/history), but the
+        // status API should not present stale "in progress" figures for a dataset that's idle.
+        Long buildingVersion = null;
+        RefreshStage refreshStage = null;
+        Long rowsProcessed = null;
+        Long batchesProcessed = null;
+        Long elapsedMs = null;
+        Double averageRowsPerSecond = null;
+        Double estimatedPercent = null;
+        if (refreshInProgress) {
+            Optional<RefreshProgress> progress = progressRegistry.find(datasetName);
+            if (progress.isPresent()) {
+                RefreshProgress p = progress.get();
+                buildingVersion = p.version();
+                refreshStage = p.currentStage();
+                rowsProcessed = p.rowsProcessed();
+                batchesProcessed = p.batchesProcessed();
+                elapsedMs = p.elapsedMs();
+                averageRowsPerSecond = p.averageRowsPerSecond();
+                estimatedPercent = p.estimatedPercent();
+            }
+        }
+
         return new DatasetStatus(
                 datasetName,
                 config.isEnabled(),
@@ -55,7 +86,14 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
                 lastStatus,
                 mostRecentAttempt.map(DatasetVersion::durationMs).orElse(null),
                 lastError,
-                refreshLock.isRunning(datasetName));
+                refreshInProgress,
+                buildingVersion,
+                refreshStage,
+                rowsProcessed,
+                batchesProcessed,
+                elapsedMs,
+                averageRowsPerSecond,
+                estimatedPercent);
     }
 
     private RefreshOutcome classify(DatasetVersion version) {

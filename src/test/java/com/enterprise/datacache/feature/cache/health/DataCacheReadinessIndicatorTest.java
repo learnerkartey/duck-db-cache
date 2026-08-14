@@ -7,7 +7,10 @@ import com.enterprise.datacache.feature.cache.config.DatasetProperties;
 import com.enterprise.datacache.feature.cache.config.StartupExecutionMode;
 import com.enterprise.datacache.feature.cache.duckdb.DuckDbConnectionFactory;
 import com.enterprise.datacache.feature.cache.metadata.MetadataStore;
+import com.enterprise.datacache.feature.cache.metrics.DataCacheMetrics;
 import com.enterprise.datacache.feature.cache.refresh.RefreshLock;
+import com.enterprise.datacache.feature.cache.refresh.RefreshProgressRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,6 +34,10 @@ class DataCacheReadinessIndicatorTest {
                 MetadataStore.defaultMetadataFile(properties.getDuckdb().getBaseDirectory()), properties.getDuckdb()));
     }
 
+    private RefreshProgressRegistry progressRegistry() {
+        return new RefreshProgressRegistry(new DataCacheMetrics(new SimpleMeterRegistry()));
+    }
+
     @Test
     void alwaysUpInAsyncExecutionModeRegardlessOfDatasetState() {
         DataCacheProperties properties = properties();
@@ -40,7 +47,7 @@ class DataCacheReadinessIndicatorTest {
         properties.getDatasets().put("financial", dataset);
 
         try (MetadataStore metadataStore = metadataStore(properties)) {
-            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock());
+            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock(), progressRegistry());
             DataCacheReadinessIndicator indicator = new DataCacheReadinessIndicator(properties, statusService);
 
             Health health = indicator.health(); // "financial" has no ACTIVE version at all
@@ -57,7 +64,7 @@ class DataCacheReadinessIndicatorTest {
         properties.getDatasets().put("financial", required);
 
         try (MetadataStore metadataStore = metadataStore(properties)) {
-            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock());
+            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock(), progressRegistry());
             DataCacheReadinessIndicator indicator = new DataCacheReadinessIndicator(properties, statusService);
 
             assertThat(indicator.health().getStatus()).isEqualTo(Status.DOWN);
@@ -76,7 +83,7 @@ class DataCacheReadinessIndicatorTest {
             metadataStore.createBuildingVersion("financial", 1, tempDir.resolve("financial_v1.duckdb"), "financial", "h1");
             metadataStore.activateVersion("financial", 1);
 
-            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock());
+            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock(), progressRegistry());
             DataCacheReadinessIndicator indicator = new DataCacheReadinessIndicator(properties, statusService);
 
             assertThat(indicator.health().getStatus()).isEqualTo(Status.UP);
@@ -99,7 +106,7 @@ class DataCacheReadinessIndicatorTest {
             metadataStore.activateVersion("financial", 1);
             // headcount never gets an ACTIVE version in this test.
 
-            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock());
+            DataCacheStatusService statusService = new DataCacheStatusServiceImpl(properties, metadataStore, new RefreshLock(), progressRegistry());
             DataCacheReadinessIndicator indicator = new DataCacheReadinessIndicator(properties, statusService);
 
             assertThat(indicator.health().getStatus()).isEqualTo(Status.UP);

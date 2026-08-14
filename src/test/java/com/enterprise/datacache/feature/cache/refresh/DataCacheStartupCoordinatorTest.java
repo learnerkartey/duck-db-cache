@@ -20,6 +20,7 @@ import com.enterprise.datacache.feature.cache.model.DatasetAvailability;
 import com.enterprise.datacache.feature.cache.model.DatasetRefreshResult;
 import com.enterprise.datacache.feature.cache.model.DatasetVersion;
 import com.enterprise.datacache.feature.cache.model.RefreshOutcome;
+import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import com.enterprise.datacache.feature.cache.model.VersionState;
 import com.enterprise.datacache.feature.cache.query.DuckDbQueryEngine;
 import com.enterprise.datacache.feature.cache.query.QueryRegistry;
@@ -84,6 +85,7 @@ class DataCacheStartupCoordinatorTest {
         final MetadataStore metadataStore;
         final VersionManager versionManager;
         final RefreshLock refreshLock;
+        final RefreshProgressRegistry progressRegistry;
         final DataCacheRefreshServiceImpl refreshService;
         final DataCacheStartupCoordinator coordinator;
 
@@ -93,9 +95,11 @@ class DataCacheStartupCoordinatorTest {
                     MetadataStore.defaultMetadataFile(properties.getDuckdb().getBaseDirectory()), properties.getDuckdb()));
             this.versionManager = new VersionManager(metadataStore, properties.getDuckdb());
             this.refreshLock = new RefreshLock();
+            DataCacheMetrics metrics = new DataCacheMetrics(new SimpleMeterRegistry());
+            this.progressRegistry = new RefreshProgressRegistry(metrics);
             RefreshCoordinator refreshCoordinator = new RefreshCoordinator(properties, source, new SqlResourceLoader(),
                     metadataStore, versionManager, new DatasetValidationService(new SqlResourceLoader()), refreshLock,
-                    new RetryExecutor(noOpSleeper), new DataCacheMetrics(new SimpleMeterRegistry()));
+                    new RetryExecutor(noOpSleeper), metrics, progressRegistry);
             this.refreshService = new DataCacheRefreshServiceImpl(refreshCoordinator, properties);
             this.coordinator = new DataCacheStartupCoordinator(properties, versionManager, refreshService);
         }
@@ -128,6 +132,24 @@ class DataCacheStartupCoordinatorTest {
             assertThat(active.version()).isEqualTo(1L);
             assertThat(active.state()).isEqualTo(VersionState.ACTIVE);
             assertThat(active.filePath()).exists();
+        }
+    }
+
+    // --- Startup refresh uses the same progress tracker as any other trigger ----------------------
+
+    @Test
+    void startupTriggeredRefreshIsTrackedByTheSameProgressRegistryAsAnyOtherTrigger() {
+        DataCacheProperties properties = baseProperties(StartupMode.USE_EXISTING_OR_CREATE);
+        try (InMemoryDremioSource source = new InMemoryDremioSource(500, 100);
+                Harness h = new Harness(properties, source)) {
+            h.coordinator.runStartupSequence(); // mandatory auto-create: no manual refresh call anywhere
+
+            await().atMost(Duration.ofSeconds(10)).until(() -> h.versionManager.findActive("widgets").isPresent());
+
+            RefreshProgress progress = h.progressRegistry.find("widgets").orElseThrow();
+            assertThat(progress.trigger()).isEqualTo(RefreshTrigger.STARTUP);
+            assertThat(progress.rowsProcessed()).isEqualTo(500);
+            assertThat(progress.datasetName()).isEqualTo("widgets");
         }
     }
 

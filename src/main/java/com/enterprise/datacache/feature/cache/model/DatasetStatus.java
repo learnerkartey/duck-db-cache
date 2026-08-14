@@ -2,7 +2,13 @@ package com.enterprise.datacache.feature.cache.model;
 
 import java.time.Instant;
 
-/** Point-in-time status snapshot for a single configured dataset, used by {@code DataCacheStatusService}. */
+/**
+ * Point-in-time status snapshot for a single configured dataset, used by {@code DataCacheStatusService}.
+ * The {@code activeVersion} a query would currently be served from is always distinct from
+ * {@code buildingVersion} - a refresh in progress never affects what's ACTIVE until it succeeds,
+ * so operators can see at a glance that queries are still being served by the old version while a
+ * new one builds.
+ */
 public record DatasetStatus(
         String datasetName,
         boolean enabled,
@@ -13,7 +19,14 @@ public record DatasetStatus(
         RefreshOutcome lastRefreshStatus,
         Long lastRefreshDurationMs,
         String lastError,
-        boolean refreshInProgress) {
+        boolean refreshInProgress,
+        Long buildingVersion,
+        RefreshStage refreshStage,
+        Long rowsProcessed,
+        Long batchesProcessed,
+        Long elapsedMs,
+        Double averageRowsPerSecond,
+        Double estimatedPercent) {
 
     /**
      * Derived, never stored separately: a dataset can only have {@code activeVersion == null} and

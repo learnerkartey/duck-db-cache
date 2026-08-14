@@ -15,10 +15,11 @@ public record RefreshTimings(
         long activationMs,
         long totalMs,
         long rowsLoaded,
-        long bytesLoaded) {
+        long bytesLoaded,
+        long batchesLoaded) {
 
     public static RefreshTimings zero() {
-        return new RefreshTimings(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        return new RefreshTimings(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     public double rowsPerSecond() {

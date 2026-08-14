@@ -28,6 +28,8 @@ public class DatasetProperties {
 
     private ValidationProperties validation = new ValidationProperties();
 
+    private DatasetProgressProperties progress = new DatasetProgressProperties();
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -90,5 +92,13 @@ public class DatasetProperties {
 
     public void setValidation(ValidationProperties validation) {
         this.validation = validation;
+    }
+
+    public DatasetProgressProperties getProgress() {
+        return progress;
+    }
+
+    public void setProgress(DatasetProgressProperties progress) {
+        this.progress = progress;
     }
 }

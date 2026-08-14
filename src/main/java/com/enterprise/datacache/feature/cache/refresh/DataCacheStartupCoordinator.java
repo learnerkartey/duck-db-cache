@@ -5,6 +5,7 @@ import com.enterprise.datacache.feature.cache.config.DatasetProperties;
 import com.enterprise.datacache.feature.cache.config.StartupExecutionMode;
 import com.enterprise.datacache.feature.cache.config.StartupMode;
 import com.enterprise.datacache.feature.cache.model.DatasetRefreshResult;
+import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import com.enterprise.datacache.feature.cache.version.VersionManager;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -76,7 +77,7 @@ public class DataCacheStartupCoordinator {
             if (!hasActiveVersion) {
                 log.info("event=startup-initial-load-triggered dataset={} reason=no-active-version required={}",
                         datasetName, config.isRequired());
-                CompletableFuture<DatasetRefreshResult> future = refreshService.refreshAsync(datasetName);
+                CompletableFuture<DatasetRefreshResult> future = refreshService.refreshAsync(datasetName, RefreshTrigger.STARTUP);
                 if (config.isRequired()) {
                     requiredInitialLoads.add(future);
                 }
@@ -85,7 +86,7 @@ public class DataCacheStartupCoordinator {
                         datasetName);
                 // Fire-and-forget: the existing ACTIVE version already serves queries, so this
                 // never needs to be part of the required-readiness wait below.
-                refreshService.refreshAsync(datasetName);
+                refreshService.refreshAsync(datasetName, RefreshTrigger.STARTUP);
             } else {
                 log.info("event=startup-reuse-existing-active dataset={} mode={}", datasetName, mode);
             }

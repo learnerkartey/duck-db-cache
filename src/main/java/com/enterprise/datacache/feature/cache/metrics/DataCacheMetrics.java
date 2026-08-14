@@ -1,11 +1,15 @@
 package com.enterprise.datacache.feature.cache.metrics;
 
 import com.enterprise.datacache.feature.cache.model.RefreshTimings;
+import com.enterprise.datacache.feature.cache.refresh.RefreshProgress;
+import com.enterprise.datacache.feature.cache.refresh.RefreshProgressRegistry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -16,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 public class DataCacheMetrics {
 
     private final MeterRegistry registry;
+    private final Set<String> progressGaugesBound = ConcurrentHashMap.newKeySet();
 
     public DataCacheMetrics(MeterRegistry registry) {
         this.registry = registry;
@@ -73,5 +78,29 @@ public class DataCacheMetrics {
 
     public void setActiveReaders(String dataset, long version, int count) {
         registry.gauge("datacache.version.active_readers", Tags.of("dataset", dataset), count);
+    }
+
+    /**
+     * Binds live in-progress-refresh gauges for {@code dataset}, reading through to whatever
+     * {@link RefreshProgress} {@code progressRegistry} currently holds for it each time a scrape
+     * happens (0 if none has ever run, or if the dataset's last-known attempt is being read after
+     * it finished). Tagged only by {@code dataset} - never by version - so cardinality stays
+     * bounded by the number of configured datasets regardless of how many versions a dataset
+     * accumulates over the application's lifetime. Idempotent: safe to call every time a refresh
+     * starts, not just the first time.
+     */
+    public void bindProgressGauges(String dataset, RefreshProgressRegistry progressRegistry) {
+        if (!progressGaugesBound.add(dataset)) {
+            return;
+        }
+        Tags tags = Tags.of("dataset", dataset);
+        registry.gauge("datacache.refresh.progress.rows_processed", tags, progressRegistry,
+                r -> r.find(dataset).map(RefreshProgress::rowsProcessed).orElse(0L).doubleValue());
+        registry.gauge("datacache.refresh.progress.batches_processed", tags, progressRegistry,
+                r -> r.find(dataset).map(RefreshProgress::batchesProcessed).orElse(0L).doubleValue());
+        registry.gauge("datacache.refresh.progress.elapsed_ms", tags, progressRegistry,
+                r -> r.find(dataset).map(RefreshProgress::elapsedMs).orElse(0L).doubleValue());
+        registry.gauge("datacache.refresh.progress.rows_per_second", tags, progressRegistry,
+                r -> r.find(dataset).map(RefreshProgress::averageRowsPerSecond).orElse(0.0));
     }
 }

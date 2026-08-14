@@ -35,6 +35,21 @@ Global startup execution strategy - see [23-STARTUP-CACHE-LIFECYCLE.md](23-START
 | `execution-mode` | `StartupExecutionMode` (`ASYNC` \| `BLOCK_UNTIL_REQUIRED_CACHE_READY`) | no | `ASYNC` | Whether startup cache loads run purely in the background or the coordinator waits for required datasets |
 | `timeout` | Duration | no | `30m` | Maximum time `BLOCK_UNTIL_REQUIRED_CACHE_READY` waits before giving up (loading continues in the background regardless) |
 
+## `data-cache.logging.progress.*`
+
+Controls INFO-level progress logging during a dataset refresh - see
+[DATA-CACHE-DEVELOPER-GUIDE.md#monitoring-a-cache-refresh-from-logs](DATA-CACHE-DEVELOPER-GUIDE.md#monitoring-a-cache-refresh-from-logs)
+for the full event reference. A progress line fires when `row-interval` rows have been processed
+since the last one OR `time-interval` has elapsed since the last one, whichever comes first.
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `enabled` | boolean | no | `true` | Master switch for `event=dataset-load-progress` lines |
+| `row-interval` | long | no | `1000000` | Emit a line after at least this many rows since the last one |
+| `time-interval` | Duration | no | `30s` | Emit a line after at least this much time since the last one |
+| `include-file-size` | boolean | no | `true` | Include the BUILDING file's current on-disk size (stat'd only when a line is about to be emitted) |
+| `include-batch-count` | boolean | no | `true` | Include the running Arrow batch count |
+
 ## `data-cache.arrow.*`
 
 | Property | Type | Required | Default | Description |
@@ -84,6 +99,7 @@ Global startup execution strategy - see [23-STARTUP-CACHE-LIFECYCLE.md](23-START
 | `validation.minimum-row-count` | long | no | `0` | `0` disables the check |
 | `validation.required-columns` | List\<String\> | no | `[]` | Case-insensitive column-name checks |
 | `validation.sql` | String | no | - | Optional resource location of a custom read-only validation query |
+| `progress.expected-row-count` | Long | no | - | Optional hint used only to compute `estimatedPercent` in progress logs/status; never affects refresh, validation, or retention |
 
 ## `data-cache.queries.<name>.*`
 

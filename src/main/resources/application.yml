@@ -45,6 +45,17 @@ data-cache:
     execution-mode: ${DATA_CACHE_STARTUP_EXECUTION_MODE:ASYNC}
     timeout: 30m
 
+  # See docs/DATA-CACHE-DEVELOPER-GUIDE.md#monitoring-a-cache-refresh-from-logs. A progress line is
+  # emitted whenever row-interval rows have been processed since the last one OR time-interval has
+  # elapsed since the last one, whichever comes first - never per row, never per Arrow batch.
+  logging:
+    progress:
+      enabled: true
+      row-interval: 1000000
+      time-interval: 30s
+      include-file-size: true
+      include-batch-count: true
+
   dremio:
     host: ${DREMIO_HOST:}
     port: ${DREMIO_PORT:32010}
@@ -83,6 +94,10 @@ data-cache:
       startup:
         mode: USE_EXISTING_OR_CREATE
       refresh-cron: "0 0 1,4,7,10,13,16,19 * * *"
+      # Optional: used only to compute estimatedPercent in progress logs/status - never affects
+      # refresh, validation, or retention behavior. Remove if you'd rather not guess a target.
+      progress:
+        expected-row-count: 30000000
       retry:
         max-attempts: 3
         initial-delay: 10s

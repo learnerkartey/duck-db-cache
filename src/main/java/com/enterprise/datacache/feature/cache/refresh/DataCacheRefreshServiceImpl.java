@@ -3,6 +3,7 @@ package com.enterprise.datacache.feature.cache.refresh;
 import com.enterprise.datacache.feature.cache.config.DataCacheProperties;
 import com.enterprise.datacache.feature.cache.model.DatasetRefreshResult;
 import com.enterprise.datacache.feature.cache.model.RefreshOutcome;
+import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -43,9 +44,9 @@ public class DataCacheRefreshServiceImpl implements DataCacheRefreshService {
     }
 
     @Override
-    public DatasetRefreshResult refresh(String datasetName) {
+    public DatasetRefreshResult refresh(String datasetName, RefreshTrigger trigger) {
         try {
-            return executor.submit(() -> coordinator.refresh(datasetName)).get();
+            return executor.submit(() -> coordinator.refresh(datasetName, trigger)).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new DatasetRefreshResult(datasetName, RefreshOutcome.FAILED, null, null, null,
@@ -56,8 +57,8 @@ public class DataCacheRefreshServiceImpl implements DataCacheRefreshService {
     }
 
     @Override
-    public CompletableFuture<DatasetRefreshResult> refreshAsync(String datasetName) {
-        return CompletableFuture.supplyAsync(() -> coordinator.refresh(datasetName), executor);
+    public CompletableFuture<DatasetRefreshResult> refreshAsync(String datasetName, RefreshTrigger trigger) {
+        return CompletableFuture.supplyAsync(() -> coordinator.refresh(datasetName, trigger), executor);
     }
 
     @Override
@@ -65,7 +66,7 @@ public class DataCacheRefreshServiceImpl implements DataCacheRefreshService {
         Map<String, CompletableFuture<DatasetRefreshResult>> futures = new LinkedHashMap<>();
         properties.getDatasets().forEach((name, config) -> {
             if (config.isEnabled()) {
-                futures.put(name, refreshAsync(name));
+                futures.put(name, refreshAsync(name, RefreshTrigger.REFRESH_ALL));
             }
         });
         Map<String, DatasetRefreshResult> results = new LinkedHashMap<>();

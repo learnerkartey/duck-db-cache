@@ -21,9 +21,11 @@ import com.enterprise.datacache.feature.cache.refresh.DataCacheStartupCoordinato
 import com.enterprise.datacache.feature.cache.refresh.DynamicRefreshScheduler;
 import com.enterprise.datacache.feature.cache.refresh.RefreshCoordinator;
 import com.enterprise.datacache.feature.cache.refresh.RefreshLock;
+import com.enterprise.datacache.feature.cache.refresh.RefreshProgressRegistry;
 import com.enterprise.datacache.feature.cache.refresh.RetryExecutor;
 import com.enterprise.datacache.feature.cache.refresh.RetrySleeper;
 import com.enterprise.datacache.feature.cache.refresh.StartupRecoveryService;
+import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import com.enterprise.datacache.feature.cache.duckdb.DuckDbConnectionFactory;
 import com.enterprise.datacache.feature.cache.spi.DremioSource;
 import com.enterprise.datacache.feature.cache.util.SqlResourceLoader;
@@ -134,12 +136,17 @@ public class DataCacheConfiguration {
     }
 
     @Bean
+    public RefreshProgressRegistry refreshProgressRegistry(DataCacheMetrics metrics) {
+        return new RefreshProgressRegistry(metrics);
+    }
+
+    @Bean
     public RefreshCoordinator refreshCoordinator(DataCacheProperties properties, DremioSource dremioSource,
             SqlResourceLoader sqlResourceLoader, MetadataStore metadataStore, VersionManager versionManager,
             DatasetValidationService datasetValidationService, RefreshLock refreshLock, RetryExecutor retryExecutor,
-            DataCacheMetrics metrics) {
+            DataCacheMetrics metrics, RefreshProgressRegistry progressRegistry) {
         return new RefreshCoordinator(properties, dremioSource, sqlResourceLoader, metadataStore, versionManager,
-                datasetValidationService, refreshLock, retryExecutor, metrics);
+                datasetValidationService, refreshLock, retryExecutor, metrics, progressRegistry);
     }
 
     @Bean(destroyMethod = "shutdown")
@@ -166,8 +173,8 @@ public class DataCacheConfiguration {
 
     @Bean
     public DataCacheStatusService dataCacheStatusService(DataCacheProperties properties, MetadataStore metadataStore,
-            RefreshLock refreshLock) {
-        return new DataCacheStatusServiceImpl(properties, metadataStore, refreshLock);
+            RefreshLock refreshLock, RefreshProgressRegistry progressRegistry) {
+        return new DataCacheStatusServiceImpl(properties, metadataStore, refreshLock, progressRegistry);
     }
 
     @Bean
@@ -194,7 +201,7 @@ public class DataCacheConfiguration {
     public DynamicRefreshScheduler dynamicRefreshScheduler(TaskScheduler dataCacheTaskScheduler,
             DataCacheProperties properties, DataCacheRefreshService dataCacheRefreshService) {
         return new DynamicRefreshScheduler(dataCacheTaskScheduler, properties,
-                datasetName -> dataCacheRefreshService.refreshAsync(datasetName));
+                datasetName -> dataCacheRefreshService.refreshAsync(datasetName, RefreshTrigger.SCHEDULED));
     }
 
     @Bean
