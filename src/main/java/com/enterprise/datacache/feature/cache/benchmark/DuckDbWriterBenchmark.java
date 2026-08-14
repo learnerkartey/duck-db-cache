@@ -59,7 +59,7 @@ public final class DuckDbWriterBenchmark {
 
         long startNanos = System.nanoTime();
         try (RootAllocator allocator = new RootAllocator(Long.MAX_VALUE);
-                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(params.outputFile(), "benchmark", duckDbProperties)) {
+                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(params.outputFile(), "benchmark", "benchmark", duckDbProperties)) {
             writer.begin(schema);
 
             long written = 0;

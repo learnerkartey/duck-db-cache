@@ -1,6 +1,7 @@
 package com.enterprise.datacache.feature.cache.duckdb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.datacache.feature.cache.config.DuckDbProperties;
 import java.math.BigDecimal;
@@ -71,7 +72,7 @@ class DuckDbDatasetWriterTest {
         props.setBaseDirectory(tempDir.toString());
         props.setTempDirectory(tempDir.resolve("temp").toString());
 
-        try (DuckDbDatasetWriter writer = new DuckDbDatasetWriter(dbFile, "financial", props)) {
+        try (DuckDbDatasetWriter writer = new DuckDbDatasetWriter(dbFile, "financial", "financial", props)) {
             writer.begin(schema);
 
             try (VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
@@ -150,11 +151,78 @@ class DuckDbDatasetWriterTest {
         DuckDbProperties props = new DuckDbProperties();
         props.setTempDirectory(tempDir.resolve("temp2").toString());
 
-        try (DuckDbDatasetWriter writer = new DuckDbDatasetWriter(dbFile, "organization", props)) {
+        try (DuckDbDatasetWriter writer = new DuckDbDatasetWriter(dbFile, "organization", "organization", props)) {
             writer.begin(schema);
             writer.finish();
         }
 
         assertThat(dbFile).exists();
+    }
+
+    @Test
+    void createsWideDecimalColumnAndPreservesExactValueViaBigDecimal() throws Exception {
+        // DECIMAL(38,9): the widest precision/scale DuckDB supports, and a real-world example of a
+        // source schema that widened from a narrower previous version (e.g. DECIMAL(18,3)). The
+        // writer must derive this DDL purely from the schema passed to begin() - see
+        // ArrowToDuckDbTypeMapper's decimal schema evolution policy javadoc.
+        Schema schema = new Schema(List.of(
+                new Field("id", FieldType.notNullable(new ArrowType.Int(32, true)), null),
+                new Field("amount", FieldType.nullable(new ArrowType.Decimal(38, 9, 128)), null)));
+        Path dbFile = tempDir.resolve("financial").resolve("financial_v11.duckdb");
+        DuckDbProperties props = new DuckDbProperties();
+        props.setTempDirectory(tempDir.resolve("temp3").toString());
+
+        BigDecimal exactValue = new BigDecimal("12345678901234567890123456789.123456789");
+        assertThat(exactValue.precision()).isEqualTo(38);
+        assertThat(exactValue.scale()).isEqualTo(9);
+
+        try (DuckDbDatasetWriter writer = new DuckDbDatasetWriter(dbFile, "financial", "financial", props)) {
+            writer.begin(schema);
+            try (VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
+                root.allocateNew();
+                ((IntVector) root.getVector("id")).setSafe(0, 1);
+                ((DecimalVector) root.getVector("amount")).setSafe(0, exactValue);
+                root.setRowCount(1);
+                writer.writeBatch(root);
+            }
+            writer.finish();
+        }
+
+        try (Connection conn = DriverManager.getConnection("jdbc:duckdb:" + dbFile.toAbsolutePath())) {
+            try (Statement stmt = conn.createStatement();
+                    ResultSet columnType = stmt.executeQuery(
+                            "SELECT data_type FROM information_schema.columns "
+                                    + "WHERE table_name = 'financial' AND column_name = 'amount'")) {
+                assertThat(columnType.next()).isTrue();
+                assertThat(columnType.getString(1)).isEqualToIgnoringCase("DECIMAL(38,9)");
+            }
+
+            try (Statement stmt = conn.createStatement();
+                    ResultSet rows = stmt.executeQuery("SELECT amount FROM financial")) {
+                assertThat(rows.next()).isTrue();
+                // Exact round-trip: not rounded, not truncated, not passed through float/double.
+                assertThat(rows.getBigDecimal("amount")).isEqualByComparingTo(exactValue);
+                assertThat(rows.getBigDecimal("amount").unscaledValue()).isEqualTo(exactValue.unscaledValue());
+            }
+        }
+    }
+
+    @Test
+    void rejectsDecimalPrecisionAboveDuckDbMaximumWithDatasetAndColumnContext() {
+        Schema schema = new Schema(List.of(new Field("amount",
+                FieldType.nullable(new ArrowType.Decimal(40, 10, 128)), null)));
+        Path dbFile = tempDir.resolve("financial").resolve("financial_v12.duckdb");
+        DuckDbProperties props = new DuckDbProperties();
+        props.setTempDirectory(tempDir.resolve("temp4").toString());
+
+        try (DuckDbDatasetWriter writer = new DuckDbDatasetWriter(dbFile, "financial", "financial", props)) {
+            assertThatThrownBy(() -> writer.begin(schema))
+                    .isInstanceOf(com.enterprise.datacache.feature.cache.exception.DecimalTypeNotSupportedException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", "DECIMAL_TYPE_NOT_SUPPORTED")
+                    .hasMessageContaining("financial")
+                    .hasMessageContaining("amount")
+                    .hasMessageContaining("40")
+                    .hasMessageContaining("10");
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.enterprise.datacache.feature.cache.arrow;
 
+import com.enterprise.datacache.feature.cache.exception.DecimalTypeNotSupportedException;
 import com.enterprise.datacache.feature.cache.exception.UnsupportedArrowTypeException;
 import java.math.BigInteger;
 import org.apache.arrow.vector.BigIntVector;
@@ -34,13 +35,27 @@ import org.apache.arrow.vector.types.pojo.Field;
  * BIGINT (signed and unsigned), FLOAT, DOUBLE, DECIMAL (precision/scale preserved), DATE and
  * TIMESTAMP (with and without time zone), always preserving SQL NULL. Any other Arrow type fails
  * loudly with {@link UnsupportedArrowTypeException} rather than silently degrading to VARCHAR.
+ *
+ * <p><b>Decimal schema evolution policy: the source Arrow type is always authoritative.</b> This
+ * method is called fresh, from the current Arrow schema, on every refresh - never from a previous
+ * DuckDB version's column types. A dataset whose source DECIMAL precision/scale changed between
+ * refreshes (e.g. {@code DECIMAL(18,3)} to {@code DECIMAL(38,9)}) gets a BUILDING version with the
+ * new, wider type; the previous ACTIVE version's file and column types are never read, referenced,
+ * or altered. If the source decimal definition cannot be represented exactly by DuckDB (currently:
+ * precision above 38, or a scale outside {@code [0, precision]}), this method fails loudly with
+ * {@link DecimalTypeNotSupportedException} rather than silently narrowing precision/scale,
+ * rounding, truncating, or converting through {@code float}/{@code double}.
  */
 public final class ArrowToDuckDbTypeMapper {
 
     private ArrowToDuckDbTypeMapper() {
     }
 
-    public static ColumnMapping map(Field field) {
+    /**
+     * @param datasetName logical dataset name, used only to enrich {@link DecimalTypeNotSupportedException}
+     *                     with which dataset/column failed
+     */
+    public static ColumnMapping map(String datasetName, Field field) {
         String name = field.getName();
         ArrowType arrowType = field.getType();
         Types.MinorType minorType = Types.getMinorTypeForArrowType(arrowType);
@@ -134,7 +149,7 @@ public final class ArrowToDuckDbTypeMapper {
                 }
             });
 
-            case DECIMAL -> mapDecimal(name, (ArrowType.Decimal) arrowType);
+            case DECIMAL -> mapDecimal(datasetName, name, (ArrowType.Decimal) arrowType);
 
             case VARCHAR, LARGEVARCHAR -> new ColumnMapping(name, "VARCHAR", (a, v, i) -> {
                 if (v.isNull(i)) {
@@ -208,15 +223,28 @@ public final class ArrowToDuckDbTypeMapper {
         };
     }
 
-    private static ColumnMapping mapDecimal(String name, ArrowType.Decimal decimal) {
+    /**
+     * Derives DuckDB {@code DECIMAL(precision,scale)} DDL directly from the source Arrow decimal
+     * type passed in for THIS refresh - never from any previously built version's column types.
+     * Values are streamed via {@link DecimalVector#getObject} (exact {@link java.math.BigDecimal},
+     * never {@code float}/{@code double}) straight into {@code DuckDBAppender.append(BigDecimal)}.
+     */
+    private static ColumnMapping mapDecimal(String datasetName, String name, ArrowType.Decimal decimal) {
         int precision = decimal.getPrecision();
         int scale = decimal.getScale();
-        if (precision > 38) {
-            throw new UnsupportedArrowTypeException(name, "DECIMAL(" + precision + "," + scale
-                    + ") exceeds DuckDB's maximum precision of 38");
+        String requestedDuckDbType = "DECIMAL(" + precision + "," + scale + ")";
+
+        if (precision < 1 || precision > 38) {
+            throw new DecimalTypeNotSupportedException(datasetName, name, precision, scale, requestedDuckDbType,
+                    "precision must be between 1 and 38 (DuckDB's maximum); the source precision cannot be "
+                            + "represented without narrowing it");
         }
-        String ddl = "DECIMAL(" + precision + "," + scale + ")";
-        return new ColumnMapping(name, ddl, (a, v, i) -> {
+        if (scale < 0 || scale > precision) {
+            throw new DecimalTypeNotSupportedException(datasetName, name, precision, scale, requestedDuckDbType,
+                    "scale must be between 0 and the column's precision (" + precision + ")");
+        }
+
+        return new ColumnMapping(name, requestedDuckDbType, (a, v, i) -> {
             if (v.isNull(i)) {
                 a.appendNull();
             } else {

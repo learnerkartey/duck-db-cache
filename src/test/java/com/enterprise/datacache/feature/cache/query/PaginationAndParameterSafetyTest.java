@@ -52,7 +52,7 @@ class PaginationAndParameterSafetyTest {
 
         Path file = tempDir.resolve("cache/widgets/widgets_v1.duckdb");
         try (RootAllocator allocator = new RootAllocator(Long.MAX_VALUE);
-                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(file, "widgets", duckDbProps)) {
+                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(file, "widgets", "widgets", duckDbProps)) {
             writer.begin(schema);
             try (VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
                 root.allocateNew();

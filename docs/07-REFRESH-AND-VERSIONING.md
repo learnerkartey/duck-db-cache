@@ -66,6 +66,28 @@ partial `..._building.duckdb` file is deleted, and **the currently ACTIVE versio
 touched**. `RefreshCoordinatorTest.failedRefreshDoesNotReplaceActiveVersion` and
 `.validationFailureDoesNotActivateNewVersion` assert this directly.
 
+## Decimal schema evolution
+
+The source Arrow type is always authoritative for a new BUILDING version - `ArrowToDuckDbTypeMapper`
+derives every column's DuckDB DDL fresh from the current Arrow schema returned by the source on
+*this* refresh (step 3c above), never from any previous version's DuckDB file. If a source
+`DECIMAL` column's precision/scale widens between refreshes (e.g. Dremio changing
+`amount DECIMAL(18,3)` to `amount DECIMAL(38,9)`), the new BUILDING version gets `DECIMAL(38,9)`
+directly - it is never silently narrowed toward the old ACTIVE version's `DECIMAL(18,3)`. Values
+stream through `DecimalVector.getObject`/`DuckDBAppender.append(BigDecimal)` end to end - exact
+`BigDecimal` arithmetic, never `float`/`double` - so precision and scale round-trip exactly.
+
+If DuckDB genuinely cannot represent the source decimal definition (precision above 38, or a scale
+outside `[0, precision]`), the mapper fails loudly with `DecimalTypeNotSupportedException`
+(`errorCode: DECIMAL_TYPE_NOT_SUPPORTED`, non-retryable) rather than rounding, truncating, or
+narrowing - the message includes the dataset, column, source precision, source scale, and the
+DuckDB type that was attempted. Like any other refresh failure (see "Failure handling" above), this
+fails only the new BUILDING version; the currently ACTIVE version - built from a schema that DID
+fit - is left completely untouched and keeps serving queries. See
+`DecimalSchemaEvolutionTest` for a full regression test of a `DECIMAL(18,3)` -> `DECIMAL(38,9)`
+refresh (new version becomes ACTIVE, old version becomes PREVIOUS, exact value round-trip) and of
+the failure path (oversized precision fails only the new version).
+
 ## Retry
 
 `RetryExecutor` retries only exceptions where `DataCacheException.isRetryable() == true`

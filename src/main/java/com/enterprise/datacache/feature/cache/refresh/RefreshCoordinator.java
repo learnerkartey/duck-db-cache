@@ -134,7 +134,7 @@ public class RefreshCoordinator {
 
             long setupStart = System.nanoTime();
             try (ArrowBatchStream stream = dremioSource.executeQuery(sourceSql);
-                    DuckDbDatasetWriter writer = new DuckDbDatasetWriter(buildingPath, tableName, duckDbProperties)) {
+                    DuckDbDatasetWriter writer = new DuckDbDatasetWriter(buildingPath, datasetName, tableName, duckDbProperties)) {
                 dremioSetupNanos = System.nanoTime() - setupStart;
 
                 writer.begin(stream.schema());

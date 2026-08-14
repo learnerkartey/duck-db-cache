@@ -54,7 +54,7 @@ class DuckDbQueryEngineTest {
                 new Field("fiscal_year", FieldType.notNullable(new ArrowType.Int(32, true)), null),
                 new Field("amount", FieldType.notNullable(new ArrowType.Decimal(12, 2, 128)), null)));
         try (RootAllocator allocator = new RootAllocator(Long.MAX_VALUE);
-                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(file, "financial", duckDbProps)) {
+                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(file, "financial", "financial", duckDbProps)) {
             writer.begin(schema);
             try (VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
                 root.allocateNew();
@@ -78,7 +78,7 @@ class DuckDbQueryEngineTest {
                 new Field("cost_center", FieldType.notNullable(new ArrowType.Utf8()), null),
                 new Field("department", FieldType.notNullable(new ArrowType.Utf8()), null)));
         try (RootAllocator allocator = new RootAllocator(Long.MAX_VALUE);
-                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(file, "organization", duckDbProps)) {
+                DuckDbDatasetWriter writer = new DuckDbDatasetWriter(file, "organization", "organization", duckDbProps)) {
             writer.begin(schema);
             try (VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
                 root.allocateNew();

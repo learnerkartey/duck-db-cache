@@ -31,6 +31,7 @@ public class DuckDbDatasetWriter implements AutoCloseable {
     private static final long FLUSH_EVERY_ROWS = 500_000L;
 
     private final Path filePath;
+    private final String datasetName;
     private final String tableName;
     private final DuckDbProperties properties;
 
@@ -40,16 +41,23 @@ public class DuckDbDatasetWriter implements AutoCloseable {
     private long rowCount;
     private long rowsSinceFlush;
 
-    public DuckDbDatasetWriter(Path filePath, String tableName, DuckDbProperties properties) {
+    public DuckDbDatasetWriter(Path filePath, String datasetName, String tableName, DuckDbProperties properties) {
         this.filePath = filePath;
+        this.datasetName = datasetName;
         this.tableName = tableName;
         this.properties = properties;
     }
 
-    /** Creates the DuckDB file and a table matching {@code schema}, then opens the Appender. Call once, before any {@link #writeBatch}. */
+    /**
+     * Creates the DuckDB file and a table matching {@code schema}, then opens the Appender. Call
+     * once, before any {@link #writeBatch}. {@code schema} is always the current Arrow schema
+     * returned by the source for this refresh - per the decimal schema evolution policy, the
+     * BUILDING version's column types are derived from it alone, never from any previous version.
+     */
     public void begin(Schema schema) {
         this.connection = DuckDbConnectionFactory.open(filePath, properties);
-        this.columnMappings = schema.getFields().stream().map(ArrowToDuckDbTypeMapper::map).toList();
+        this.columnMappings = schema.getFields().stream()
+                .map(field -> ArrowToDuckDbTypeMapper.map(datasetName, field)).toList();
         createTable();
         try {
             this.appender = connection.createAppender(DuckDBConnection.DEFAULT_SCHEMA, tableName);
