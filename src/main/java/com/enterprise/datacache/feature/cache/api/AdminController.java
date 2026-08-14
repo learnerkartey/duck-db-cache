@@ -34,6 +34,28 @@ public class AdminController {
         return refreshService.refresh(datasetName, RefreshTrigger.MANUAL);
     }
 
+    /**
+     * Explicitly resumes a paused/interrupted BUILDING version from its last completed chunk.
+     * Automatic startup resume never requires this to be called - it exists purely so an operator
+     * can explicitly continue a known paused build (see {@code status=PAUSED_RETRYABLE} on
+     * {@link #getDataset}) rather than issuing the more general {@code /refresh}.
+     */
+    @PostMapping("/datasets/{datasetName}/resume")
+    public DatasetRefreshResult resumeDataset(@PathVariable String datasetName) {
+        return refreshService.resume(datasetName);
+    }
+
+    /**
+     * Intentionally abandons any partial BUILDING version for this dataset and starts a brand-new
+     * version from zero, even if the partial build would otherwise be safely resumable. The current
+     * ACTIVE version is never touched. Protected admin operation - use only when a partial build is
+     * known to be undesirable to continue (e.g. built against a now-known-bad source state).
+     */
+    @PostMapping("/datasets/{datasetName}/restart-refresh")
+    public DatasetRefreshResult restartRefresh(@PathVariable String datasetName) {
+        return refreshService.restartRefresh(datasetName);
+    }
+
     @PostMapping("/refresh-all")
     public Map<String, DatasetRefreshResult> refreshAll() {
         return refreshService.refreshAll();

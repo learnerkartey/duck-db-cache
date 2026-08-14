@@ -4,8 +4,11 @@ import com.enterprise.datacache.feature.cache.config.DataCacheProperties;
 import com.enterprise.datacache.feature.cache.config.DatasetProperties;
 import com.enterprise.datacache.feature.cache.exception.DatasetNotFoundException;
 import com.enterprise.datacache.feature.cache.metadata.MetadataStore;
+import com.enterprise.datacache.feature.cache.model.ChunkStatus;
+import com.enterprise.datacache.feature.cache.model.DatasetChunk;
 import com.enterprise.datacache.feature.cache.model.DatasetStatus;
 import com.enterprise.datacache.feature.cache.model.DatasetVersion;
+import com.enterprise.datacache.feature.cache.model.RefreshManifest;
 import com.enterprise.datacache.feature.cache.model.RefreshOutcome;
 import com.enterprise.datacache.feature.cache.model.RefreshStage;
 import com.enterprise.datacache.feature.cache.model.VersionState;
@@ -44,13 +47,14 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
         Optional<DatasetVersion> previous = versions.stream().filter(v -> v.state() == VersionState.PREVIOUS).findFirst();
         Optional<DatasetVersion> mostRecentAttempt = versions.stream().findFirst();
 
-        RefreshOutcome lastStatus = mostRecentAttempt.map(this::classify).orElse(RefreshOutcome.NEVER_RUN);
+        boolean refreshInProgress = refreshLock.isRunning(datasetName);
+        boolean resumable = properties.getResume().isEnabled() && config.getResume().isEnabled();
+
+        RefreshOutcome lastStatus = mostRecentAttempt.map(v -> classify(v, refreshInProgress)).orElse(RefreshOutcome.NEVER_RUN);
         String lastError = mostRecentAttempt
                 .filter(v -> v.state() == VersionState.FAILED)
                 .map(DatasetVersion::errorSummary)
                 .orElse(null);
-
-        boolean refreshInProgress = refreshLock.isRunning(datasetName);
 
         // Live progress fields are populated only while a refresh is actually in flight - once it
         // finishes, RefreshProgress may still be in the registry (for metrics/history), but the
@@ -62,6 +66,15 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
         Long elapsedMs = null;
         Double averageRowsPerSecond = null;
         Double estimatedPercent = null;
+        Boolean resuming = null;
+        Long completedChunks = null;
+        Long totalChunks = null;
+        Long rowsCommitted = null;
+        Long currentChunk = null;
+        Long failedChunk = null;
+        String sourceSnapshotId = null;
+        boolean pausedRetryable = false;
+
         if (refreshInProgress) {
             Optional<RefreshProgress> progress = progressRegistry.find(datasetName);
             if (progress.isPresent()) {
@@ -73,6 +86,33 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
                 elapsedMs = p.elapsedMs();
                 averageRowsPerSecond = p.averageRowsPerSecond();
                 estimatedPercent = p.estimatedPercent();
+                if (p.totalChunks() != null) {
+                    resuming = p.isResuming();
+                    completedChunks = p.completedChunks();
+                    totalChunks = p.totalChunks();
+                    rowsCommitted = p.rowsProcessed(); // recordBatch() only fires on a durable chunk commit
+                    currentChunk = p.currentChunk();
+                    failedChunk = p.failedChunk();
+                }
+            }
+        } else if (resumable) {
+            // No refresh is actively running right now, but a BUILDING manifest can still exist -
+            // preserved across a crash/restart by StartupRecoveryService, or left paused after its
+            // retry budget was exhausted - waiting to be resumed automatically or via the admin
+            // /resume endpoint. Pulled from persisted metadata since there is no live RefreshProgress
+            // for it.
+            Optional<RefreshManifest> manifest = metadataStore.findBuildingManifest(datasetName);
+            if (manifest.isPresent()) {
+                RefreshManifest m = manifest.get();
+                pausedRetryable = true;
+                buildingVersion = m.version();
+                completedChunks = m.completedChunks();
+                totalChunks = m.totalChunks();
+                rowsCommitted = m.rowsCommitted();
+                sourceSnapshotId = m.sourceSnapshotId();
+                List<DatasetChunk> chunks = metadataStore.findChunks(datasetName, m.version());
+                failedChunk = chunks.stream().filter(c -> c.status() == ChunkStatus.FAILED)
+                        .map(DatasetChunk::chunkId).findFirst().orElse(null);
             }
         }
 
@@ -93,14 +133,28 @@ public class DataCacheStatusServiceImpl implements DataCacheStatusService {
                 batchesProcessed,
                 elapsedMs,
                 averageRowsPerSecond,
-                estimatedPercent);
+                estimatedPercent,
+                resumable,
+                resuming,
+                completedChunks,
+                totalChunks,
+                rowsCommitted,
+                currentChunk,
+                failedChunk,
+                sourceSnapshotId,
+                pausedRetryable);
     }
 
-    private RefreshOutcome classify(DatasetVersion version) {
+    private RefreshOutcome classify(DatasetVersion version, boolean refreshInProgress) {
         return switch (version.state()) {
             case ACTIVE, PREVIOUS -> RefreshOutcome.SUCCESS;
             case FAILED -> "VALIDATION_FAILED".equals(version.errorCode()) ? RefreshOutcome.VALIDATION_FAILED : RefreshOutcome.FAILED;
-            case BUILDING, VALIDATING -> RefreshOutcome.FAILED;
+            case BUILDING, VALIDATING ->
+                // A currently-running attempt is not yet a completed outcome at all - only report
+                // PAUSED_RETRYABLE for a version that is genuinely sitting idle (a resumable partial
+                // build preserved across a crash/restart, or one waiting for its next retry), never
+                // for a version actively being worked on by this process right now.
+                refreshInProgress ? RefreshOutcome.FAILED : RefreshOutcome.PAUSED_RETRYABLE;
         };
     }
 

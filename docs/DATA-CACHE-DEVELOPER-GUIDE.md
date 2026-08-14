@@ -724,7 +724,160 @@ batches are only ever logged at `DEBUG`, if at all). Set `data-cache.logging.pro
 false` to silence periodic progress lines entirely while keeping the start/first-batch/completed/
 failed summary events, which are never gated by this configuration.
 
-## 24. Troubleshooting
+## 24. Resuming a large cache load after failure
+
+Sections 20-21 above cover the *simple* refresh path: a failed BUILDING version is discarded and
+the next attempt restarts from zero, while ACTIVE keeps serving queries throughout. For a dataset
+large enough that "restart from zero" is genuinely expensive - the worked example below is a 60M-row
+`financial` refresh - that framework also supports **resumable** refresh: `data-cache.resume.*`
+config that makes a BUILDING version survive a crash and continue from its last durably-committed
+chunk instead. Full design reference: [RESUMABLE-REFRESH-AND-RECOVERY.md](RESUMABLE-REFRESH-AND-RECOVERY.md).
+This section walks the exact scenario end to end.
+
+### The setup
+
+`financial` is configured with a stable, monotonic `transaction_id` key, so it can safely opt in:
+
+```yaml
+data-cache:
+  resume:
+    enabled: true
+    max-resume-age: 24h
+  datasets:
+    financial:
+      source-sql: classpath:datacache/dremio/financial.sql
+      resume:
+        enabled: true
+        strategy: RANGE
+        partition-column: transaction_id
+        chunk-size: 500000
+        consistency: STRICT_SNAPSHOT
+        snapshot:
+          mode: AS_OF_VALUE
+          parameter-name: cacheAsOf
+```
+
+```sql
+-- classpath:datacache/dremio/financial.sql
+SELECT transaction_id, cost_center, fiscal_year, amount, ingestion_timestamp
+FROM financial_transactions
+WHERE ingestion_timestamp <= :cacheAsOf
+```
+
+`chunk-size: 500000` over a 60M-row dataset plans **120 chunks**. `snapshot.mode: AS_OF_VALUE`
+captures one timestamp when V13's BUILDING version is first created and binds that same value into
+every chunk's query - including chunks executed after a restart - so a resumed V13 never reads a
+mix of "the source as of Tuesday" for its first 40M rows and "the source as of Wednesday" for its
+last 20M.
+
+### The crash
+
+```
+financial V12 ACTIVE (previous successful load), 58,000,000 rows
+
+V13 refresh starts: 120 chunks planned, snapshot captured as 2026-08-14T02:00:00Z
+
+Chunks 1-40 complete normally - 20,000,000 rows durably committed, each chunk's completion
+persisted to dataset_refresh_chunk as it finishes
+
+The pod is killed (OOM, node drain, deploy rollout - the cause does not matter) partway through
+chunk 41
+```
+
+The progress log immediately before the crash:
+
+```
+event=dataset-load-progress dataset=financial version=13 status=BUILDING rowsProcessed=20000000 \
+    resume=false rowsCommitted=20000000 completedChunks=40 totalChunks=120
+```
+
+### What did NOT happen
+
+- The 20,000,000 already-loaded rows were **not** thrown away.
+- Nothing tried to reconnect to the broken Arrow Flight stream chunk 41 was using - that stream is
+  gone, permanently (see [RESUMABLE-REFRESH-AND-RECOVERY.md §1](RESUMABLE-REFRESH-AND-RECOVERY.md#1-why-a-broken-arrow-stream-cannot-simply-be-resumed)).
+- V12 was **not** touched. Every query issued while the pod was down (once it comes back) and while
+  V13 resumes continues to see V12's 58,000,000 rows.
+
+### The restart
+
+A new pod starts. Startup recovery finds `financial` version 13 still `BUILDING`, with a live
+manifest (`resume_enabled=true`, `status=BUILDING`, within `max-resume-age`) and a `.duckdb` file
+that opens cleanly - so it is preserved, not deleted:
+
+```
+event=startup-recovery-resumable-build-preserved dataset=financial version=13 completedChunks=40 \
+    totalChunks=120 rowsCommitted=20000000 refreshId=8f3e2a1c-...
+```
+
+Because `startup.mode: USE_EXISTING_OR_CREATE` sees an ACTIVE version (V12) already present, it
+would normally do nothing further for this dataset - but a preserved resumable BUILDING version
+changes that: `DataCacheStartupCoordinator` triggers a background resume for V13 automatically,
+without any operator action:
+
+```
+event=startup-resume-triggered dataset=financial mode=USE_EXISTING_OR_CREATE existingActiveAvailableImmediately=true
+event=dataset-refresh-started dataset=financial version=13 trigger=STARTUP startupRefresh=true status=BUILDING resumable=true
+event=dataset-refresh-resuming dataset=financial version=13 completedChunks=40 totalChunks=120 \
+    rowsCommitted=20000000 nextChunk=41
+```
+
+Chunk 41 is re-run from scratch (its previous attempt never reached a durable commit, so there is
+nothing to clean up before reloading it - see
+[RESUMABLE-REFRESH-AND-RECOVERY.md §8](RESUMABLE-REFRESH-AND-RECOVERY.md#8-how-duplicate-prevention-works)
+for what happens in the narrower case where it *had* committed but the process died before that was
+recorded). Chunks 1-40 are **never** re-queried - they are skipped purely from the persisted
+`COMPLETED` chunk rows, with zero Dremio calls:
+
+```
+event=dataset-load-progress dataset=financial version=13 status=BUILDING rowsProcessed=20500000 \
+    resume=true rowsCommitted=20500000 completedChunks=41 totalChunks=120
+```
+
+Query traffic against `financial` never noticed any of this - `GET /api/v1/cache/admin/datasets/financial`
+throughout the whole restart+resume sequence:
+
+```json
+{
+  "activeVersion": 12,
+  "activeRowCount": 58000000,
+  "buildingVersion": 13,
+  "refreshInProgress": true,
+  "resuming": true,
+  "completedChunks": 41,
+  "totalChunks": 120,
+  "rowsCommitted": 20500000
+}
+```
+
+### Completion
+
+Chunks 42-120 continue normally. Once all 120 are `COMPLETED`, the internal chunk-tracking column
+is dropped, validation runs, and V13 activates exactly like any other successful refresh:
+
+```
+event=dataset-load-completed dataset=financial version=13 rowsProcessed=60000000 resumed=true
+event=dataset-validation-started dataset=financial version=13
+event=dataset-version-activated dataset=financial newVersion=13 previousVersion=12 rowCount=60000000
+```
+
+From this point, `activeVersion` is 13, `activeRowCount` is 60,000,000, and V12 becomes PREVIOUS.
+The final row count is correct, no chunk was loaded twice, and no query ever saw a partially-built
+or mixed-schema version of `financial`.
+
+### If it cannot resume safely
+
+If, instead, the source SQL or the Arrow schema had changed between the crash and the restart (say
+Dremio's `amount` column widened from `DECIMAL(18,3)` to `DECIMAL(38,9)` in the interim), the
+resume attempt would detect that on the first chunk it processes, log
+`event=dataset-resume-abandoned ... reason=source schema changed ...`, mark V13 `ABANDONED`, and
+start a fresh V14 from zero - V12 would still be serving queries the entire time. This is a
+deliberate design choice: **a correct 60M-row cache is more important than saving 20M rows of
+previous load work.** See
+[RESUMABLE-REFRESH-AND-RECOVERY.md §10](RESUMABLE-REFRESH-AND-RECOVERY.md#10-when-resume-is-refused)
+for the full list of conditions that trigger this.
+
+## 25. Troubleshooting
 
 See [19-TROUBLESHOOTING.md](19-TROUBLESHOOTING.md) for the full table. Startup-lifecycle-specific
 issues are in [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md) and the table below:
@@ -736,7 +889,7 @@ issues are in [23-STARTUP-CACHE-LIFECYCLE.md](23-STARTUP-CACHE-LIFECYCLE.md) and
 | Query returns `DATASET_NOT_AVAILABLE` right after startup | Dataset is still on its mandatory first load (`ASYNC` mode) | Poll `GET /api/v1/cache/admin/datasets/<name>` until `activeVersion` is non-null, or switch to `BLOCK_UNTIL_REQUIRED_CACHE_READY` |
 | Readiness probe never turns green | `BLOCK_UNTIL_REQUIRED_CACHE_READY` and a `required: true` dataset's first load is failing | Check its status/`lastError`; mark it `required: false` if it shouldn't gate readiness |
 
-## 25. Embedding into another service
+## 26. Embedding into another service
 
 Assume an existing Spring Boot 3 service, `existing-finance-service`, wants this cache without
 running the standalone demo app.
@@ -818,6 +971,7 @@ variables, and a complete before/after directory tree:
 | New dataset entirely | New source `.sql` file + dataset YAML entry |
 | New/changed refresh time | Configuration only (`refresh-cron`) |
 | Change first-start vs. restart behavior | `startup.mode` (per dataset) / `data-cache.startup.execution-mode` (global) |
+| Make a large dataset survive a crash mid-load instead of restarting from zero | `resume.enabled: true` + a stable partition key (section 24, [RESUMABLE-REFRESH-AND-RECOVERY.md](RESUMABLE-REFRESH-AND-RECOVERY.md)) |
 
 No scenario in either table requires writing a new Java class.
 

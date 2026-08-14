@@ -100,6 +100,24 @@ since the last one OR `time-interval` has elapsed since the last one, whichever 
 | `validation.required-columns` | List\<String\> | no | `[]` | Case-insensitive column-name checks |
 | `validation.sql` | String | no | - | Optional resource location of a custom read-only validation query |
 | `progress.expected-row-count` | Long | no | - | Optional hint used only to compute `estimatedPercent` in progress logs/status; never affects refresh, validation, or retention |
+| `resume.enabled` | boolean | no | `false` | Opt-in per dataset; requires a genuinely stable resume key. Full reference: [RESUMABLE-REFRESH-AND-RECOVERY.md](RESUMABLE-REFRESH-AND-RECOVERY.md) |
+| `resume.strategy` | `ResumeStrategyType` (`RANGE` \| `TIME_RANGE` \| `HASH_BUCKET`) | required if `resume.enabled` | - | Chunk partitioning strategy |
+| `resume.partition-column` | String | required for `RANGE`/`TIME_RANGE` | - | Must be a plain SQL identifier |
+| `resume.chunk-size` | long | no | `500000` | Target rows per chunk for `RANGE` |
+| `resume.interval` | Duration | required for `TIME_RANGE` | - | Chunk width, e.g. `1d` |
+| `resume.hash-buckets` | int | no | `128` | Bucket count for `HASH_BUCKET` |
+| `resume.hash-expression` | String | required for `HASH_BUCKET` | - | Trusted, dataset-owner-supplied SQL expression; never invented or verified by the framework |
+| `resume.snapshot.mode` | `SnapshotMode` (`NONE` \| `AS_OF_VALUE`) | no | `NONE` | `AS_OF_VALUE` binds one captured value into every chunk's query for source-read consistency |
+| `resume.snapshot.parameter-name` | String | required if `snapshot.mode: AS_OF_VALUE` | - | The `:name` token referenced in `source-sql` |
+| `resume.consistency` | `ConsistencyMode` (`STRICT_SNAPSHOT` \| `BEST_EFFORT`) | no | `STRICT_SNAPSHOT` | `STRICT_SNAPSHOT` requires a snapshot binding - config validation fails at startup otherwise |
+
+### `data-cache.resume.*` (global)
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `enabled` | boolean | no | `true` | Master switch; `false` disables resume for every dataset regardless of its own setting |
+| `max-resume-age` | Duration | no | `24h` | A BUILDING version older than this is abandoned and restarted fresh rather than resumed |
+| `on-incompatible-source` | `IncompatibleSourceAction` (`RESTART_NEW_VERSION`) | no | `RESTART_NEW_VERSION` | Action taken when SQL/schema incompatibility is detected mid-resume |
 
 ## `data-cache.queries.<name>.*`
 
@@ -134,5 +152,10 @@ A missing or empty resource fails startup with `InvalidConfigurationException`.
 - any enabled dataset with a blank `source-sql`
 - any enabled dataset with an invalid `refresh-cron` expression
 - any dataset's `retry.max-attempts < 1` or `retry.multiplier <= 0`
+- a non-positive `resume.max-resume-age`
+- any enabled, resume-enabled dataset missing `resume.strategy`, a required `resume.partition-column`/
+  `resume.interval`/`resume.hash-expression` for its strategy, or (the default `consistency:
+  STRICT_SNAPSHOT`) a `resume.snapshot.mode: AS_OF_VALUE` binding - never silently falls back to an
+  unsafe resume; see [RESUMABLE-REFRESH-AND-RECOVERY.md §10](RESUMABLE-REFRESH-AND-RECOVERY.md#10-when-resume-is-refused)
 - any query with a blank `sql`, an empty `datasets` list, or a `datasets` entry that does not
   name a configured, enabled dataset

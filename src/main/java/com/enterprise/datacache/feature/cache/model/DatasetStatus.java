@@ -26,7 +26,16 @@ public record DatasetStatus(
         Long batchesProcessed,
         Long elapsedMs,
         Double averageRowsPerSecond,
-        Double estimatedPercent) {
+        Double estimatedPercent,
+        boolean resumable,
+        Boolean resuming,
+        Long completedChunks,
+        Long totalChunks,
+        Long rowsCommitted,
+        Long currentChunk,
+        Long failedChunk,
+        String sourceSnapshotId,
+        boolean pausedRetryable) {
 
     /**
      * Derived, never stored separately: a dataset can only have {@code activeVersion == null} and

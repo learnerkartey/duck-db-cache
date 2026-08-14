@@ -34,4 +34,22 @@ public interface DataCacheRefreshService {
      * configured concurrency bound, and waits for all to finish.
      */
     Map<String, DatasetRefreshResult> refreshAll();
+
+    /**
+     * Explicitly resumes a dataset's paused/interrupted BUILDING version. Behaves exactly like
+     * {@link #refresh(String)} except it first confirms a resumable BUILDING manifest actually
+     * exists - if not, returns {@link com.enterprise.datacache.feature.cache.model.RefreshOutcome#NO_RESUMABLE_BUILD}
+     * without triggering any work, rather than silently starting a brand-new full load. Automatic
+     * startup resume does not depend on this method being called - it is a convenience entry point
+     * for operators who want to explicitly continue a known paused build.
+     */
+    DatasetRefreshResult resume(String datasetName);
+
+    /**
+     * Intentionally abandons any partial BUILDING version for this dataset (even if it would
+     * otherwise be safely resumable) and starts a brand-new version from zero. The current ACTIVE
+     * version is never touched - queries keep being served throughout. Intended as a protected
+     * admin operation.
+     */
+    DatasetRefreshResult restartRefresh(String datasetName);
 }

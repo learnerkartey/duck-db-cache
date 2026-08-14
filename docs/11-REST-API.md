@@ -47,7 +47,24 @@ Triggers a manual refresh and blocks until it completes. Response body is a
 }
 ```
 
-`outcome` is one of `SUCCESS`, `FAILED`, `VALIDATION_FAILED`, `ALREADY_RUNNING`, `DISABLED`.
+`outcome` is one of `SUCCESS`, `FAILED`, `VALIDATION_FAILED`, `ALREADY_RUNNING`, `DISABLED`,
+`PAUSED_RETRYABLE` (a resumable dataset's BUILDING version paused after a failure - ACTIVE is
+unaffected), `NO_RESUMABLE_BUILD` (only returned by `/resume` below). For a resumable dataset with
+an existing compatible BUILDING version, this endpoint already resumes it rather than starting a
+new version - see [RESUMABLE-REFRESH-AND-RECOVERY.md](RESUMABLE-REFRESH-AND-RECOVERY.md).
+
+## `POST /api/v1/cache/admin/datasets/{datasetName}/resume`
+
+Same response shape as `/refresh` above, but first confirms a resumable BUILDING manifest actually
+exists for this dataset; if not, returns immediately with `outcome: NO_RESUMABLE_BUILD` rather than
+starting a brand-new full load. Automatic startup resume never depends on this endpoint being
+called - it exists for operator visibility/control.
+
+## `POST /api/v1/cache/admin/datasets/{datasetName}/restart-refresh`
+
+**Protected admin operation.** Intentionally abandons any partial BUILDING version for this dataset
+- even one that would otherwise be safely resumable - and starts a brand-new version from zero. The
+current ACTIVE version is never touched. Same response shape as `/refresh`.
 
 ## `POST /api/v1/cache/admin/refresh-all`
 
@@ -77,16 +94,28 @@ Response is `Map<String, DatasetStatus>` for every configured dataset:
     "batchesProcessed": null,
     "elapsedMs": null,
     "averageRowsPerSecond": null,
-    "estimatedPercent": null
+    "estimatedPercent": null,
+    "resumable": false,
+    "resuming": null,
+    "completedChunks": null,
+    "totalChunks": null,
+    "rowsCommitted": null,
+    "currentChunk": null,
+    "failedChunk": null,
+    "sourceSnapshotId": null,
+    "pausedRetryable": false
   }
 }
 ```
 
 No passwords, raw SQL, or file paths are ever included. While a refresh is in flight,
-`activeVersion` keeps reporting the version still serving queries and the last seven fields above
-describe the separate in-flight `buildingVersion` - see
+`activeVersion` keeps reporting the version still serving queries and the fields from
+`buildingVersion` onward describe the separate in-flight `buildingVersion` - see
 [DATA-CACHE-DEVELOPER-GUIDE.md#22-status-and-health](DATA-CACHE-DEVELOPER-GUIDE.md#22-status-and-health)
-for a worked mid-refresh example.
+for a worked mid-refresh example. The `resumable`/`resuming`/`completedChunks`/`totalChunks`/
+`rowsCommitted`/`currentChunk`/`failedChunk`/`sourceSnapshotId`/`pausedRetryable` fields are only
+meaningful for datasets with `resume.enabled: true` - see
+[RESUMABLE-REFRESH-AND-RECOVERY.md §16](RESUMABLE-REFRESH-AND-RECOVERY.md#16-operational-status).
 
 ## `GET /api/v1/cache/admin/datasets/{datasetName}`
 

@@ -81,6 +81,7 @@ The specialized documents below go deeper on each topic.
 | 21 | [Embedding in an Existing Service](docs/21-EMBEDDING-IN-EXISTING-SERVICE.md) | Short pointer to the full integration guide below |
 | 22 | [End-to-End Example](docs/22-EXAMPLES-END-TO-END.md) | Full worked scenario, including a restart |
 | 23 | [Startup Cache Lifecycle](docs/23-STARTUP-CACHE-LIFECYCLE.md) | First-start auto-create, restart behavior, `StartupMode`, blocking vs. async startup |
+| - | [Resumable Refresh and Recovery](docs/RESUMABLE-REFRESH-AND-RECOVERY.md) | Crash-safe chunked loading for large datasets - checkpointing, idempotent retry, source-consistency guarantees, when a full restart is required |
 | - | [Integrate into an Existing Spring Boot Service](docs/INTEGRATE-INTO-EXISTING-SPRING-BOOT-SERVICE.md) | Copying `feature.cache` into another Spring Boot application - dependencies, config, `@EnableDataCache`, minimum-change checklist |
 
 ## Technology

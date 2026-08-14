@@ -62,6 +62,32 @@ public class DataCacheRefreshServiceImpl implements DataCacheRefreshService {
     }
 
     @Override
+    public DatasetRefreshResult resume(String datasetName) {
+        try {
+            return executor.submit(() -> coordinator.resume(datasetName)).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new DatasetRefreshResult(datasetName, RefreshOutcome.FAILED, null, null, null,
+                    "INTERRUPTED", "Resume was interrupted", 0);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw (e.getCause() instanceof RuntimeException re) ? re : new RuntimeException(e.getCause());
+        }
+    }
+
+    @Override
+    public DatasetRefreshResult restartRefresh(String datasetName) {
+        try {
+            return executor.submit(() -> coordinator.restartRefresh(datasetName)).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new DatasetRefreshResult(datasetName, RefreshOutcome.FAILED, null, null, null,
+                    "INTERRUPTED", "Restart-refresh was interrupted", 0);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw (e.getCause() instanceof RuntimeException re) ? re : new RuntimeException(e.getCause());
+        }
+    }
+
+    @Override
     public Map<String, DatasetRefreshResult> refreshAll() {
         Map<String, CompletableFuture<DatasetRefreshResult>> futures = new LinkedHashMap<>();
         properties.getDatasets().forEach((name, config) -> {

@@ -24,6 +24,7 @@ import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import com.enterprise.datacache.feature.cache.model.VersionState;
 import com.enterprise.datacache.feature.cache.query.DuckDbQueryEngine;
 import com.enterprise.datacache.feature.cache.query.QueryRegistry;
+import com.enterprise.datacache.feature.cache.resume.ResumableRefreshExecutor;
 import com.enterprise.datacache.feature.cache.spi.ArrowBatchStream;
 import com.enterprise.datacache.feature.cache.spi.DremioSource;
 import com.enterprise.datacache.feature.cache.testsupport.BlockingDremioSource;
@@ -99,9 +100,10 @@ class DataCacheStartupCoordinatorTest {
             this.progressRegistry = new RefreshProgressRegistry(metrics);
             RefreshCoordinator refreshCoordinator = new RefreshCoordinator(properties, source, new SqlResourceLoader(),
                     metadataStore, versionManager, new DatasetValidationService(new SqlResourceLoader()), refreshLock,
-                    new RetryExecutor(noOpSleeper), metrics, progressRegistry);
+                    new RetryExecutor(noOpSleeper), metrics, progressRegistry,
+                    new ResumableRefreshExecutor(properties, source, new SqlResourceLoader(), metadataStore));
             this.refreshService = new DataCacheRefreshServiceImpl(refreshCoordinator, properties);
-            this.coordinator = new DataCacheStartupCoordinator(properties, versionManager, refreshService);
+            this.coordinator = new DataCacheStartupCoordinator(properties, versionManager, refreshService, metadataStore);
         }
 
         DuckDbQueryEngine queryEngine() {

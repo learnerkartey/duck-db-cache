@@ -27,6 +27,7 @@ import com.enterprise.datacache.feature.cache.refresh.RetrySleeper;
 import com.enterprise.datacache.feature.cache.refresh.StartupRecoveryService;
 import com.enterprise.datacache.feature.cache.model.RefreshTrigger;
 import com.enterprise.datacache.feature.cache.duckdb.DuckDbConnectionFactory;
+import com.enterprise.datacache.feature.cache.resume.ResumableRefreshExecutor;
 import com.enterprise.datacache.feature.cache.spi.DremioSource;
 import com.enterprise.datacache.feature.cache.util.SqlResourceLoader;
 import com.enterprise.datacache.feature.cache.validation.DatasetValidationService;
@@ -141,12 +142,19 @@ public class DataCacheConfiguration {
     }
 
     @Bean
+    public ResumableRefreshExecutor resumableRefreshExecutor(DataCacheProperties properties, DremioSource dremioSource,
+            SqlResourceLoader sqlResourceLoader, MetadataStore metadataStore) {
+        return new ResumableRefreshExecutor(properties, dremioSource, sqlResourceLoader, metadataStore);
+    }
+
+    @Bean
     public RefreshCoordinator refreshCoordinator(DataCacheProperties properties, DremioSource dremioSource,
             SqlResourceLoader sqlResourceLoader, MetadataStore metadataStore, VersionManager versionManager,
             DatasetValidationService datasetValidationService, RefreshLock refreshLock, RetryExecutor retryExecutor,
-            DataCacheMetrics metrics, RefreshProgressRegistry progressRegistry) {
+            DataCacheMetrics metrics, RefreshProgressRegistry progressRegistry,
+            ResumableRefreshExecutor resumableRefreshExecutor) {
         return new RefreshCoordinator(properties, dremioSource, sqlResourceLoader, metadataStore, versionManager,
-                datasetValidationService, refreshLock, retryExecutor, metrics, progressRegistry);
+                datasetValidationService, refreshLock, retryExecutor, metrics, progressRegistry, resumableRefreshExecutor);
     }
 
     @Bean(destroyMethod = "shutdown")
@@ -206,8 +214,8 @@ public class DataCacheConfiguration {
 
     @Bean
     public DataCacheStartupCoordinator dataCacheStartupCoordinator(DataCacheProperties properties,
-            VersionManager versionManager, DataCacheRefreshService dataCacheRefreshService) {
-        return new DataCacheStartupCoordinator(properties, versionManager, dataCacheRefreshService);
+            VersionManager versionManager, DataCacheRefreshService dataCacheRefreshService, MetadataStore metadataStore) {
+        return new DataCacheStartupCoordinator(properties, versionManager, dataCacheRefreshService, metadataStore);
     }
 
     @Bean

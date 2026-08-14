@@ -23,7 +23,7 @@ import java.util.function.LongSupplier;
 public final class RefreshProgress {
 
     private final String datasetName;
-    private final long version;
+    private volatile long version;
     private final RefreshTrigger trigger;
     private final Long previousVersionRowCount;
     private final Long expectedRowCount;
@@ -36,6 +36,15 @@ public final class RefreshProgress {
     private final AtomicLong bytesProcessed = new AtomicLong();
     private volatile long timeToFirstBatchMs = -1;
     private volatile long completedNanos = -1;
+
+    // Resumable-refresh-only fields (see ResumableRefreshExecutor); unused/left at defaults for a
+    // dataset with resume disabled, since it has no chunk concept at all.
+    private final AtomicLong rowsRead = new AtomicLong();
+    private volatile boolean resuming = false;
+    private volatile Long totalChunks;
+    private volatile long completedChunks;
+    private volatile Long currentChunk;
+    private volatile Long failedChunk;
 
     // Only ever touched by the single refresh-worker thread that also calls recordBatch/checkThreshold
     // for this instance - synchronized purely for defensive clarity, not because of real contention.
@@ -65,6 +74,16 @@ public final class RefreshProgress {
 
     public long version() {
         return version;
+    }
+
+    /**
+     * Corrects the tracked version when a resumable refresh's initial guess (the currently BUILDING
+     * manifest's version, or the next allocable version if none exists) turns out to be wrong -
+     * only possible when a resume candidate is discovered mid-decision to be incompatible and a
+     * fresh version is allocated instead. A no-op change of identity, not of accumulated counters.
+     */
+    public void updateVersion(long newVersion) {
+        this.version = newVersion;
     }
 
     public RefreshTrigger trigger() {
@@ -109,6 +128,57 @@ public final class RefreshProgress {
 
     public long bytesProcessed() {
         return bytesProcessed.get();
+    }
+
+    /** Rows streamed from the source so far, whether or not they have been durably committed yet - see {@link #rowsProcessed()} for the durable count. */
+    public void recordRead(long rowsInBatch) {
+        rowsRead.addAndGet(rowsInBatch);
+    }
+
+    public long rowsRead() {
+        return rowsRead.get();
+    }
+
+    /** Marks this attempt as resuming a previously interrupted BUILDING version rather than starting fresh. */
+    public void markResuming(long completedChunks, Long totalChunks, long rowsAlreadyCommitted) {
+        this.resuming = true;
+        this.completedChunks = completedChunks;
+        this.totalChunks = totalChunks;
+        this.rowsProcessed.set(rowsAlreadyCommitted);
+    }
+
+    public boolean isResuming() {
+        return resuming;
+    }
+
+    public void updateChunkProgress(long completedChunks, Long totalChunks, Long currentChunk) {
+        this.completedChunks = completedChunks;
+        this.totalChunks = totalChunks;
+        this.currentChunk = currentChunk;
+    }
+
+    public void recordChunkFailed(long chunkId) {
+        this.failedChunk = chunkId;
+    }
+
+    public void clearFailedChunk() {
+        this.failedChunk = null;
+    }
+
+    public Long totalChunks() {
+        return totalChunks;
+    }
+
+    public long completedChunks() {
+        return completedChunks;
+    }
+
+    public Long currentChunk() {
+        return currentChunk;
+    }
+
+    public Long failedChunk() {
+        return failedChunk;
     }
 
     /** Elapsed time since this attempt started; frozen once a terminal stage is reached rather than growing forever. */
@@ -170,11 +240,12 @@ public final class RefreshProgress {
         lastCheckpointNanos = nowNanos;
 
         return Optional.of(new Checkpoint(rowsProcessed(), batchesProcessed(), bytesProcessed(), elapsedMs(),
-                averageRowsPerSecond(), intervalRowsPerSecond, stage));
+                averageRowsPerSecond(), intervalRowsPerSecond, stage, resuming, completedChunks, totalChunks));
     }
 
     /** Immutable snapshot of running totals plus the throughput observed since the previous checkpoint. */
     public record Checkpoint(long rowsProcessed, long batchesProcessed, long bytesProcessed, long elapsedMs,
-            double averageRowsPerSecond, double intervalRowsPerSecond, RefreshStage stage) {
+            double averageRowsPerSecond, double intervalRowsPerSecond, RefreshStage stage, boolean resuming,
+            long completedChunks, Long totalChunks) {
     }
 }

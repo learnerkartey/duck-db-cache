@@ -30,6 +30,8 @@ public class DataCacheProperties {
 
     private LoggingProperties logging = new LoggingProperties();
 
+    private GlobalResumeProperties resume = new GlobalResumeProperties();
+
     /** Dataset name -&gt; configuration. Keys are the stable logical/table names used in analytical SQL. */
     private Map<String, DatasetProperties> datasets = new LinkedHashMap<>();
 
@@ -106,6 +108,14 @@ public class DataCacheProperties {
 
     public void setLogging(LoggingProperties logging) {
         this.logging = logging;
+    }
+
+    public GlobalResumeProperties getResume() {
+        return resume;
+    }
+
+    public void setResume(GlobalResumeProperties resume) {
+        this.resume = resume;
     }
 
     public Map<String, DatasetProperties> getDatasets() {

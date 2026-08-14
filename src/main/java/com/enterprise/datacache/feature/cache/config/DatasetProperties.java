@@ -30,6 +30,8 @@ public class DatasetProperties {
 
     private DatasetProgressProperties progress = new DatasetProgressProperties();
 
+    private DatasetResumeProperties resume = new DatasetResumeProperties();
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -100,5 +102,13 @@ public class DatasetProperties {
 
     public void setProgress(DatasetProgressProperties progress) {
         this.progress = progress;
+    }
+
+    public DatasetResumeProperties getResume() {
+        return resume;
+    }
+
+    public void setResume(DatasetResumeProperties resume) {
+        this.resume = resume;
     }
 }

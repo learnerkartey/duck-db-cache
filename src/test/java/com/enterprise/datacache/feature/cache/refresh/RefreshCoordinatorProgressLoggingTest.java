@@ -15,6 +15,7 @@ import com.enterprise.datacache.feature.cache.metadata.MetadataStore;
 import com.enterprise.datacache.feature.cache.metrics.DataCacheMetrics;
 import com.enterprise.datacache.feature.cache.model.DatasetRefreshResult;
 import com.enterprise.datacache.feature.cache.model.RefreshOutcome;
+import com.enterprise.datacache.feature.cache.resume.ResumableRefreshExecutor;
 import com.enterprise.datacache.feature.cache.spi.DremioSource;
 import com.enterprise.datacache.feature.cache.testsupport.InMemoryDremioSource;
 import com.enterprise.datacache.feature.cache.testsupport.PartialStreamThenFailDremioSource;
@@ -87,7 +88,8 @@ class RefreshCoordinatorProgressLoggingTest {
         DataCacheMetrics metrics = new DataCacheMetrics(new SimpleMeterRegistry());
         return new RefreshCoordinator(properties, source, new SqlResourceLoader(), metadataStore, versionManager,
                 new DatasetValidationService(new SqlResourceLoader()), new RefreshLock(),
-                new RetryExecutor(noOpSleeper), metrics, progressRegistry);
+                new RetryExecutor(noOpSleeper), metrics, progressRegistry,
+                new ResumableRefreshExecutor(properties, source, new SqlResourceLoader(), metadataStore));
     }
 
     private MetadataStore newMetadataStore(DuckDbProperties duckDbProps) {

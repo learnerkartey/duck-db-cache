@@ -1,7 +1,14 @@
 package com.enterprise.datacache.feature.cache.metadata;
 
 import com.enterprise.datacache.feature.cache.exception.DuckDbWriteException;
+import com.enterprise.datacache.feature.cache.model.ChunkDefinition;
+import com.enterprise.datacache.feature.cache.model.ChunkStatus;
+import com.enterprise.datacache.feature.cache.model.ConsistencyMode;
+import com.enterprise.datacache.feature.cache.model.DatasetChunk;
 import com.enterprise.datacache.feature.cache.model.DatasetVersion;
+import com.enterprise.datacache.feature.cache.model.RefreshManifest;
+import com.enterprise.datacache.feature.cache.model.RefreshManifestStatus;
+import com.enterprise.datacache.feature.cache.model.ResumeStrategyType;
 import com.enterprise.datacache.feature.cache.model.ValidationStatus;
 import com.enterprise.datacache.feature.cache.model.VersionState;
 import java.nio.file.Path;
@@ -62,9 +69,51 @@ public class MetadataStore implements AutoCloseable {
                     PRIMARY KEY (dataset_name, version)
                 )
                 """;
+        String manifestDdl = """
+                CREATE TABLE IF NOT EXISTS dataset_refresh_manifest (
+                    dataset_name VARCHAR NOT NULL,
+                    version BIGINT NOT NULL,
+                    refresh_id VARCHAR NOT NULL,
+                    source_sql_hash VARCHAR NOT NULL,
+                    source_schema_hash VARCHAR,
+                    resume_enabled BOOLEAN NOT NULL,
+                    resume_strategy VARCHAR,
+                    partition_column VARCHAR,
+                    chunk_size BIGINT,
+                    source_snapshot_id VARCHAR,
+                    consistency_mode VARCHAR,
+                    total_chunks BIGINT,
+                    completed_chunks BIGINT NOT NULL DEFAULT 0,
+                    failed_chunks BIGINT NOT NULL DEFAULT 0,
+                    rows_committed BIGINT NOT NULL DEFAULT 0,
+                    status VARCHAR NOT NULL,
+                    started_at TIMESTAMP NOT NULL,
+                    last_updated_at TIMESTAMP NOT NULL,
+                    PRIMARY KEY (dataset_name, version)
+                )
+                """;
+        String chunkDdl = """
+                CREATE TABLE IF NOT EXISTS dataset_refresh_chunk (
+                    dataset_name VARCHAR NOT NULL,
+                    version BIGINT NOT NULL,
+                    chunk_id BIGINT NOT NULL,
+                    partition_start VARCHAR,
+                    partition_end VARCHAR,
+                    status VARCHAR NOT NULL,
+                    rows_loaded BIGINT NOT NULL DEFAULT 0,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    attempt_count INT NOT NULL DEFAULT 0,
+                    error_code VARCHAR,
+                    error_summary VARCHAR,
+                    PRIMARY KEY (dataset_name, version, chunk_id)
+                )
+                """;
         synchronized (this) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(ddl);
+                statement.execute(manifestDdl);
+                statement.execute(chunkDdl);
             } catch (SQLException e) {
                 throw new DuckDbWriteException("Failed to create metadata schema", e);
             }
@@ -262,6 +311,260 @@ public class MetadataStore implements AutoCloseable {
             throw new DuckDbWriteException("Failed to list dataset names from metadata", e);
         }
         return names;
+    }
+
+    // --- Resumable refresh: manifest -----------------------------------------------------------
+
+    public synchronized void createManifest(RefreshManifest manifest) {
+        String sql = """
+                INSERT INTO dataset_refresh_manifest
+                    (dataset_name, version, refresh_id, source_sql_hash, source_schema_hash, resume_enabled,
+                     resume_strategy, partition_column, chunk_size, source_snapshot_id, consistency_mode,
+                     total_chunks, completed_chunks, failed_chunks, rows_committed, status, started_at, last_updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)
+                """;
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, manifest.datasetName());
+            ps.setLong(2, manifest.version());
+            ps.setString(3, manifest.refreshId());
+            ps.setString(4, manifest.sourceSqlHash());
+            ps.setString(5, manifest.sourceSchemaHash());
+            ps.setBoolean(6, manifest.resumeEnabled());
+            ps.setString(7, manifest.resumeStrategy() == null ? null : manifest.resumeStrategy().name());
+            ps.setString(8, manifest.partitionColumn());
+            if (manifest.chunkSize() == null) {
+                ps.setNull(9, java.sql.Types.BIGINT);
+            } else {
+                ps.setLong(9, manifest.chunkSize());
+            }
+            ps.setString(10, manifest.sourceSnapshotId());
+            ps.setString(11, manifest.consistencyMode() == null ? null : manifest.consistencyMode().name());
+            if (manifest.totalChunks() == null) {
+                ps.setNull(12, java.sql.Types.BIGINT);
+            } else {
+                ps.setLong(12, manifest.totalChunks());
+            }
+            ps.setString(13, manifest.status().name());
+            ps.setTimestamp(14, Timestamp.from(manifest.startedAt()));
+            ps.setTimestamp(15, Timestamp.from(manifest.lastUpdatedAt()));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new DuckDbWriteException("Failed to create refresh manifest " + manifest.datasetName()
+                    + " v" + manifest.version(), e);
+        }
+    }
+
+    public synchronized void updateManifestTotalChunks(String datasetName, long version, long totalChunks) {
+        execUpdate("UPDATE dataset_refresh_manifest SET total_chunks = ?, last_updated_at = ? "
+                + "WHERE dataset_name = ? AND version = ?", ps -> {
+            ps.setLong(1, totalChunks);
+            ps.setTimestamp(2, Timestamp.from(Instant.now()));
+            ps.setString(3, datasetName);
+            ps.setLong(4, version);
+        });
+    }
+
+    public synchronized void updateManifestSchemaHash(String datasetName, long version, String schemaHash) {
+        execUpdate("UPDATE dataset_refresh_manifest SET source_schema_hash = ?, last_updated_at = ? "
+                + "WHERE dataset_name = ? AND version = ?", ps -> {
+            ps.setString(1, schemaHash);
+            ps.setTimestamp(2, Timestamp.from(Instant.now()));
+            ps.setString(3, datasetName);
+            ps.setLong(4, version);
+        });
+    }
+
+    public synchronized void recordManifestChunkProgress(String datasetName, long version, long completedChunks,
+            long failedChunks, long rowsCommitted) {
+        execUpdate("UPDATE dataset_refresh_manifest SET completed_chunks = ?, failed_chunks = ?, rows_committed = ?, "
+                + "last_updated_at = ? WHERE dataset_name = ? AND version = ?", ps -> {
+            ps.setLong(1, completedChunks);
+            ps.setLong(2, failedChunks);
+            ps.setLong(3, rowsCommitted);
+            ps.setTimestamp(4, Timestamp.from(Instant.now()));
+            ps.setString(5, datasetName);
+            ps.setLong(6, version);
+        });
+    }
+
+    public synchronized void updateManifestStatus(String datasetName, long version, RefreshManifestStatus status) {
+        execUpdate("UPDATE dataset_refresh_manifest SET status = ?, last_updated_at = ? "
+                + "WHERE dataset_name = ? AND version = ?", ps -> {
+            ps.setString(1, status.name());
+            ps.setTimestamp(2, Timestamp.from(Instant.now()));
+            ps.setString(3, datasetName);
+            ps.setLong(4, version);
+        });
+    }
+
+    public synchronized Optional<RefreshManifest> findManifest(String datasetName, long version) {
+        return queryOneManifest("SELECT * FROM dataset_refresh_manifest WHERE dataset_name = ? AND version = ?",
+                ps -> {
+                    ps.setString(1, datasetName);
+                    ps.setLong(2, version);
+                });
+    }
+
+    /** The most recent manifest still in BUILDING status - the only candidate for resume. */
+    public synchronized Optional<RefreshManifest> findBuildingManifest(String datasetName) {
+        return queryOneManifest("SELECT * FROM dataset_refresh_manifest WHERE dataset_name = ? AND status = 'BUILDING' "
+                + "ORDER BY version DESC LIMIT 1", ps -> ps.setString(1, datasetName));
+    }
+
+    private Optional<RefreshManifest> queryOneManifest(String sql, Binder binder) {
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            binder.bind(ps);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(mapManifestRow(rs));
+            }
+        } catch (SQLException e) {
+            throw new DuckDbWriteException("Manifest query failed: " + sql, e);
+        }
+    }
+
+    private RefreshManifest mapManifestRow(ResultSet rs) throws SQLException {
+        long totalChunks = rs.getLong("total_chunks");
+        boolean totalChunksNull = rs.wasNull();
+        long chunkSize = rs.getLong("chunk_size");
+        boolean chunkSizeNull = rs.wasNull();
+        String strategy = rs.getString("resume_strategy");
+        String consistency = rs.getString("consistency_mode");
+        return new RefreshManifest(
+                rs.getString("dataset_name"),
+                rs.getLong("version"),
+                rs.getString("refresh_id"),
+                rs.getString("source_sql_hash"),
+                rs.getString("source_schema_hash"),
+                rs.getBoolean("resume_enabled"),
+                strategy == null ? null : ResumeStrategyType.valueOf(strategy),
+                rs.getString("partition_column"),
+                chunkSizeNull ? null : chunkSize,
+                rs.getString("source_snapshot_id"),
+                consistency == null ? null : ConsistencyMode.valueOf(consistency),
+                totalChunksNull ? null : totalChunks,
+                rs.getLong("completed_chunks"),
+                rs.getLong("failed_chunks"),
+                rs.getLong("rows_committed"),
+                RefreshManifestStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("started_at").toInstant(),
+                rs.getTimestamp("last_updated_at").toInstant());
+    }
+
+    // --- Resumable refresh: chunks -------------------------------------------------------------
+
+    /** Bulk-inserts every planned chunk as PENDING, in one transaction. */
+    public synchronized void planChunks(String datasetName, long version, List<ChunkDefinition> chunks) {
+        String sql = "INSERT INTO dataset_refresh_chunk "
+                + "(dataset_name, version, chunk_id, partition_start, partition_end, status, rows_loaded, attempt_count) "
+                + "VALUES (?, ?, ?, ?, ?, 'PENDING', 0, 0)";
+        try {
+            connection.setAutoCommit(false);
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                for (ChunkDefinition chunk : chunks) {
+                    ps.setString(1, datasetName);
+                    ps.setLong(2, version);
+                    ps.setLong(3, chunk.chunkId());
+                    ps.setString(4, chunk.partitionStart());
+                    ps.setString(5, chunk.partitionEnd());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            connection.commit();
+        } catch (SQLException e) {
+            rollbackQuietly();
+            throw new DuckDbWriteException("Failed to plan " + chunks.size() + " chunks for " + datasetName
+                    + " v" + version, e);
+        } finally {
+            setAutoCommitQuietly(true);
+        }
+    }
+
+    public synchronized List<DatasetChunk> findChunks(String datasetName, long version) {
+        List<DatasetChunk> results = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT * FROM dataset_refresh_chunk WHERE dataset_name = ? AND version = ? ORDER BY chunk_id")) {
+            ps.setString(1, datasetName);
+            ps.setLong(2, version);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    results.add(mapChunkRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new DuckDbWriteException("Failed to load chunks for " + datasetName + " v" + version, e);
+        }
+        return results;
+    }
+
+    /** Any chunk found RUNNING is a crash artifact - at most one process ever loads a dataset's
+     *  chunks at a time (enforced by {@code RefreshLock}), so a RUNNING row can only mean the
+     *  process that started it never got to mark it COMPLETED or FAILED. */
+    public synchronized int resetStaleRunningChunksToPending(String datasetName, long version) {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "UPDATE dataset_refresh_chunk SET status = 'PENDING' "
+                        + "WHERE dataset_name = ? AND version = ? AND status = 'RUNNING'")) {
+            ps.setString(1, datasetName);
+            ps.setLong(2, version);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new DuckDbWriteException("Failed to reset stale RUNNING chunks for " + datasetName + " v" + version, e);
+        }
+    }
+
+    public synchronized void markChunkRunning(String datasetName, long version, long chunkId) {
+        execUpdate("UPDATE dataset_refresh_chunk SET status = 'RUNNING', started_at = ?, attempt_count = attempt_count + 1 "
+                + "WHERE dataset_name = ? AND version = ? AND chunk_id = ?", ps -> {
+            ps.setTimestamp(1, Timestamp.from(Instant.now()));
+            ps.setString(2, datasetName);
+            ps.setLong(3, version);
+            ps.setLong(4, chunkId);
+        });
+    }
+
+    public synchronized void markChunkCompleted(String datasetName, long version, long chunkId, long rowsLoaded) {
+        execUpdate("UPDATE dataset_refresh_chunk SET status = 'COMPLETED', completed_at = ?, rows_loaded = ?, "
+                + "error_code = NULL, error_summary = NULL "
+                + "WHERE dataset_name = ? AND version = ? AND chunk_id = ?", ps -> {
+            ps.setTimestamp(1, Timestamp.from(Instant.now()));
+            ps.setLong(2, rowsLoaded);
+            ps.setString(3, datasetName);
+            ps.setLong(4, version);
+            ps.setLong(5, chunkId);
+        });
+    }
+
+    public synchronized void markChunkFailed(String datasetName, long version, long chunkId, String errorCode,
+            String errorSummary) {
+        execUpdate("UPDATE dataset_refresh_chunk SET status = 'FAILED', error_code = ?, error_summary = ? "
+                + "WHERE dataset_name = ? AND version = ? AND chunk_id = ?", ps -> {
+            ps.setString(1, errorCode);
+            ps.setString(2, truncate(errorSummary, 2000));
+            ps.setString(3, datasetName);
+            ps.setLong(4, version);
+            ps.setLong(5, chunkId);
+        });
+    }
+
+    private DatasetChunk mapChunkRow(ResultSet rs) throws SQLException {
+        Timestamp startedAt = rs.getTimestamp("started_at");
+        Timestamp completedAt = rs.getTimestamp("completed_at");
+        return new DatasetChunk(
+                rs.getString("dataset_name"),
+                rs.getLong("version"),
+                rs.getLong("chunk_id"),
+                rs.getString("partition_start"),
+                rs.getString("partition_end"),
+                ChunkStatus.valueOf(rs.getString("status")),
+                rs.getLong("rows_loaded"),
+                startedAt == null ? null : startedAt.toInstant(),
+                completedAt == null ? null : completedAt.toInstant(),
+                rs.getInt("attempt_count"),
+                rs.getString("error_code"),
+                rs.getString("error_summary"));
     }
 
     @FunctionalInterface

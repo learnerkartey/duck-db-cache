@@ -13,6 +13,7 @@ import com.enterprise.datacache.feature.cache.model.DatasetRefreshResult;
 import com.enterprise.datacache.feature.cache.model.DatasetVersion;
 import com.enterprise.datacache.feature.cache.model.RefreshOutcome;
 import com.enterprise.datacache.feature.cache.model.VersionState;
+import com.enterprise.datacache.feature.cache.resume.ResumableRefreshExecutor;
 import com.enterprise.datacache.feature.cache.testsupport.DecimalSchemaDremioSource;
 import com.enterprise.datacache.feature.cache.util.SqlResourceLoader;
 import com.enterprise.datacache.feature.cache.validation.DatasetValidationService;
@@ -66,7 +67,8 @@ class DecimalSchemaEvolutionTest {
         DataCacheMetrics metrics = new DataCacheMetrics(new SimpleMeterRegistry());
         return new RefreshCoordinator(properties, source, new SqlResourceLoader(), metadataStore, versionManager,
                 new DatasetValidationService(new SqlResourceLoader()), new RefreshLock(),
-                new RetryExecutor(noOpSleeper), metrics, new RefreshProgressRegistry(metrics));
+                new RetryExecutor(noOpSleeper), metrics, new RefreshProgressRegistry(metrics),
+                new ResumableRefreshExecutor(properties, source, new SqlResourceLoader(), metadataStore));
     }
 
     private MetadataStore newMetadataStore(DuckDbProperties duckDbProps) {

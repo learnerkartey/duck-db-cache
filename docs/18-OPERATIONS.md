@@ -38,6 +38,8 @@ The initial design assumes **one refresh-owning replica**. Practical deployment 
 | `activeVersion: null` | Never successfully refreshed, or startup recovery marked the ACTIVE file `FAILED` (missing file) | Trigger a manual refresh |
 | Disk filling up under `duckdb.base-directory` | `max-versions` too high, or refreshes failing before cleanup runs | Lower `max-versions`; check for `event=version-cleanup-deferred` logs indicating stuck readers |
 | Query 500s intermittently right after a refresh completes | Should not happen - version pinning is designed to prevent this; file a bug with the query name and dataset versions involved | - |
+| `lastRefreshStatus: PAUSED_RETRYABLE` / `pausedRetryable: true` | A resumable dataset's BUILDING version is sitting paused after a failure, waiting for its next retry, automatic startup resume, or an explicit `POST .../resume` | Not itself an error - ACTIVE keeps serving queries; see [RESUMABLE-REFRESH-AND-RECOVERY.md](RESUMABLE-REFRESH-AND-RECOVERY.md) |
+| Disk headroom for a resumable dataset | Up to three physical generations (ACTIVE, PREVIOUS, BUILDING) can coexist while a resume is in progress, not just two | Size the volume for `3x` that dataset's on-disk size - see [RESUMABLE-REFRESH-AND-RECOVERY.md §18](RESUMABLE-REFRESH-AND-RECOVERY.md#18-disk-capacity-during-a-resume) |
 
 ## Graceful shutdown
 
